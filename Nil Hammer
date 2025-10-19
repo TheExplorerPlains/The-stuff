@@ -1,0 +1,424 @@
+-- NilHammer_BugTool.lua
+-- Complete LocalScript for “Nil hammer” UI + Bug & Liquid effects + Clear all bugs
+-- Includes two-tap bug, liquid effect with natural gravity, clear bugs, draggable UI, minimize/open.
+
+--------------------------------------------------------------------------------
+-- SERVICES & CONFIGURATION
+--------------------------------------------------------------------------------
+local Players          = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage= game:GetService("ReplicatedStorage")
+local RunService       = game:GetService("RunService")
+local TweenService     = game:GetService("TweenService")
+
+-- Bug-asset config
+local BUG_TOOL_NAME    = "2 Delete"
+local BUG_ASSET_ID     = 41324945
+local BUG_ASSET_UID    = "{99ab22df-ca29-4143-a2fd-Oa1b79db78c2}"
+
+-- Liquid-asset config
+local LIQUID_ASSET_ID  = 56451715
+local LIQUID_ASSET_UID = "{3ae31e60-5cd0-4d80-96b6-a1dd894ece8a}"
+
+--------------------------------------------------------------------------------
+-- PLAYER & REMOTES
+--------------------------------------------------------------------------------
+local player      = Players.LocalPlayer
+local character   = player.Character or player.CharacterAdded:Wait()
+local playerGui   = player:WaitForChild("PlayerGui")
+local Remotes     = ReplicatedStorage:WaitForChild("Remotes")
+local StampAsset  = Remotes:WaitForChild("StampAsset")
+local DeleteAsset = Remotes:WaitForChild("DeleteAsset")
+
+--------------------------------------------------------------------------------
+-- PLATE & ACTIVEPARTS LOOKUP
+--------------------------------------------------------------------------------
+local Plates = workspace:WaitForChild("Plates")
+local localPlate, LPlate, ActiveParts
+for _, pf in ipairs(Plates:GetChildren()) do
+    if pf:FindFirstChild("Owner") and pf.Owner.Value == player then
+        localPlate, LPlate      = pf, pf:FindFirstChild("Plate")
+        ActiveParts             = pf:FindFirstChild("ActiveParts")
+        break
+    end
+end
+assert(LPlate and ActiveParts, "NilHammer: plate or ActiveParts not found!")
+
+--------------------------------------------------------------------------------
+-- STATE
+--------------------------------------------------------------------------------
+local bugEffectEnabled    = true
+local liquidEffectEnabled = false
+local equipped            = false
+local selectedPart        = nil
+local highlight           = nil
+local liquidDebounce      = false
+
+--------------------------------------------------------------------------------
+-- HELPERS
+--------------------------------------------------------------------------------
+-- Returns the player-character model if `part` belongs to one
+local function getCharacterModel(part)
+    local mdl = part:FindFirstAncestorOfClass("Model")
+    if mdl and mdl:FindFirstChild("Humanoid") then return mdl end
+    return nil
+end
+
+-- Waits for a new child under ActiveParts
+local function waitForNewModel(beforeSet, timeout)
+    timeout = timeout or 2
+    local deadline = tick() + timeout
+    while tick() < deadline do
+        for _, c in ipairs(ActiveParts:GetChildren()) do
+            if not table.find(beforeSet, c) then
+                return c
+            end
+        end
+        RunService.Heartbeat:Wait()
+    end
+    return nil
+end
+
+--------------------------------------------------------------------------------
+-- BUG FUNCTIONS
+--------------------------------------------------------------------------------
+-- Stamps the bug asset welded to `part` down in the void
+local function bugPart(part)
+    local spawnCF = LPlate.CFrame + Vector3.new(0, -2e21, 0)
+    StampAsset:InvokeServer(BUG_ASSET_ID, spawnCF, BUG_ASSET_UID, { part }, 0)
+end
+
+-- Clears any current highlight
+local function clearHighlight()
+    if highlight then highlight:Destroy() end
+    highlight, selectedPart = nil, nil
+end
+
+-- Highlights a new part for bug selection
+local function tryHighlight(part)
+    clearHighlight()
+    if not bugEffectEnabled then return end
+    if part:IsDescendantOf(localPlate) then return end
+    if getCharacterModel(part) == character then return end
+    highlight = Instance.new("Highlight", part)
+    highlight.FillTransparency    = 0.5
+    highlight.OutlineTransparency = 0.25
+    selectedPart = part
+end
+
+--------------------------------------------------------------------------------
+-- LIQUID FUNCTIONS
+--------------------------------------------------------------------------------
+-- Stamps an Ice block, teleports it, and lets it fall under gravity
+local function spawnLiquidAt(hitCFrame)
+    local before = ActiveParts:GetChildren()
+    StampAsset:InvokeServer(
+        LIQUID_ASSET_ID,
+        LPlate.CFrame + Vector3.new(0, 10, 0),
+        LIQUID_ASSET_UID,
+        {},
+        0
+    )
+    local model = waitForNewModel(before, 2)
+    if not model then return end
+
+    -- Find the actual “Ice” part (size 4×4) or fallback
+    local icePart = model:FindFirstChild("Ice", true) or model.PrimaryPart
+    if not icePart then return end
+
+    -- Prepare physics so it falls naturally
+    icePart.Anchored   = false
+    icePart.CanCollide = false
+    icePart.CFrame     = hitCFrame
+
+    -- Optional: add slight surface drag or other forces here
+end
+
+--------------------------------------------------------------------------------
+-- TOOL EQUIP LOGIC
+--------------------------------------------------------------------------------
+-- Watches for the specified tool in backpack or character
+local function watchTool(tool)
+    if tool:IsA("Tool") and tool.Name == BUG_TOOL_NAME then
+        tool.Equipped:Connect(function() equipped = true end)
+        tool.Unequipped:Connect(function()
+            equipped = false
+            clearHighlight()
+        end)
+    end
+end
+
+for _, t in ipairs(player.Backpack:GetChildren()) do watchTool(t) end
+if character then
+    for _, t in ipairs(character:GetChildren()) do watchTool(t) end
+end
+player.Backpack.ChildAdded:Connect(watchTool)
+player.CharacterAdded:Connect(function(char)
+    character = char
+    char.ChildAdded:Connect(watchTool)
+end)
+
+--------------------------------------------------------------------------------
+-- INPUT HANDLERS
+--------------------------------------------------------------------------------
+local mouse = player:GetMouse()
+mouse.TargetFilter = localPlate
+
+-- Desktop click: either liquid or bug logic
+mouse.Button1Down:Connect(function()
+    if not equipped then return end
+    local part      = mouse.Target
+    local hitCFrame = mouse.Hit
+
+    -- Liquid effect
+    if liquidEffectEnabled then
+        if liquidDebounce then return end
+        if part and (part:IsDescendantOf(localPlate) or getCharacterModel(part) == character) then return end
+        liquidDebounce = true
+        spawnLiquidAt(hitCFrame)
+        task.delay(0.2, function() liquidDebounce = false end)
+        return
+    end
+
+    -- Bug effect two-tap
+    if bugEffectEnabled then
+        if not (part and part:IsA("BasePart")) then return end
+        if part:IsDescendantOf(localPlate) or getCharacterModel(part) == character then return end
+        if selectedPart ~= part then
+            tryHighlight(part)
+        else
+            bugPart(part)
+            clearHighlight()
+        end
+    end
+end)
+
+-- Mobile tap
+UserInputService.InputBegan:Connect(function(inp, processed)
+    if processed or not equipped then return end
+    if inp.UserInputType ~= Enum.UserInputType.Touch then return end
+
+    local cam    = workspace.CurrentCamera
+    local ray    = cam:ScreenPointToRay(inp.Position.X, inp.Position.Y)
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = { localPlate }
+    params.FilterType                 = Enum.RaycastFilterType.Blacklist
+    local res = workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
+    if not (res and res.Instance) then return end
+
+    local part      = res.Instance
+    local hitCFrame = CFrame.new(res.Position, res.Position + res.Normal)
+
+    -- Liquid effect
+    if liquidEffectEnabled then
+        if liquidDebounce then return end
+        if part:IsDescendantOf(localPlate) or getCharacterModel(part) == character then return end
+        liquidDebounce = true
+        spawnLiquidAt(hitCFrame)
+        task.delay(0.2, function() liquidDebounce = false end)
+        return
+    end
+
+    -- Bug effect two-tap
+    if bugEffectEnabled then
+        if part:IsDescendantOf(localPlate) or getCharacterModel(part) == character then return end
+        if selectedPart ~= part then
+            tryHighlight(part)
+        else
+            bugPart(part)
+            clearHighlight()
+        end
+    end
+end)
+
+--------------------------------------------------------------------------------
+-- UI CREATION
+--------------------------------------------------------------------------------
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name           = "NilHammerUI"
+screenGui.ResetOnSpawn   = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent         = playerGui
+
+-- Main Frame (300×280), Draggable
+local mainFrame = Instance.new("Frame", screenGui)
+mainFrame.Name             = "MainFrame"
+mainFrame.AnchorPoint      = Vector2.new(0.5, 0)
+mainFrame.Position         = UDim2.new(0.5, 0, 0.2, 0)
+mainFrame.Size             = UDim2.new(0, 300, 0, 280)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20,20,25)
+mainFrame.BorderSizePixel  = 0
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0,12)
+
+-- Draggable logic
+do
+    local dragging, dragInput, dragStart, startPos
+    local function update(input)
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+    mainFrame.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = inp.Position
+            startPos  = mainFrame.Position
+            inp.Changed:Connect(function()
+                if inp.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    mainFrame.InputChanged:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch then
+            dragInput = inp
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if inp == dragInput and dragging then update(inp) end
+    end)
+end
+
+-- Title Bar
+local titleBar = Instance.new("Frame", mainFrame)
+titleBar.Size             = UDim2.new(1,0,0,32)
+titleBar.Position         = UDim2.new(0,0,0,0)
+titleBar.BackgroundColor3 = Color3.fromRGB(15,15,20)
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0,12)
+
+local titleText = Instance.new("TextLabel", titleBar)
+titleText.Size               = UDim2.new(1,-60,1,0)
+titleText.Position           = UDim2.new(0,12,0,0)
+titleText.BackgroundTransparency = 1
+titleText.Text               = "Nil hammer"
+titleText.Font               = Enum.Font.GothamBold
+titleText.TextSize           = 18
+titleText.TextColor3         = Color3.fromRGB(220,230,255)
+titleText.TextXAlignment     = Enum.TextXAlignment.Left
+
+local minimizeBtn = Instance.new("TextButton", titleBar)
+minimizeBtn.Size             = UDim2.new(0,24,0,24)
+minimizeBtn.Position         = UDim2.new(1,-30,0,4)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(200,50,50)
+minimizeBtn.Text             = "–"
+minimizeBtn.Font             = Enum.Font.GothamBold
+minimizeBtn.TextSize         = 16
+minimizeBtn.TextColor3       = Color3.new(1,1,1)
+minimizeBtn.BorderSizePixel  = 0
+Instance.new("UICorner", minimizeBtn).CornerRadius = UDim.new(0,6)
+
+-- Content Container
+local content = Instance.new("Frame", mainFrame)
+content.Size                  = UDim2.new(1,-20,1,-60)
+content.Position              = UDim2.new(0,10,0,40)
+content.BackgroundTransparency = 1
+
+-- Toggle and Button Factory
+local function createToggle(parent, text, default, y, callback)
+    local f = Instance.new("Frame", parent)
+    f.Size             = UDim2.new(1,0,0,32)
+    f.Position         = UDim2.new(0,0,0,y)
+    f.BackgroundColor3 = Color3.fromRGB(25,30,40)
+    Instance.new("UICorner", f).CornerRadius = UDim.new(0,8)
+
+    local lbl = Instance.new("TextLabel", f)
+    lbl.Size               = UDim2.new(0.6,0,1,0)
+    lbl.Position           = UDim2.new(0,8,0,0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text               = text
+    lbl.Font               = Enum.Font.GothamMedium
+    lbl.TextSize           = 14
+    lbl.TextColor3         = Color3.fromRGB(220,230,255)
+    lbl.TextXAlignment     = Enum.TextXAlignment.Left
+
+    local bg = Instance.new("Frame", f)
+    bg.Size             = UDim2.new(0,48,0,24)
+    bg.Position         = UDim2.new(1,-56,0.5,-12)
+    bg.BackgroundColor3 = default and Color3.fromRGB(0,120,215) or Color3.fromRGB(60,60,70)
+    Instance.new("UICorner", bg).CornerRadius = UDim.new(1,0)
+
+    local knob = Instance.new("Frame", bg)
+    knob.Size             = UDim2.new(0,20,0,20)
+    knob.Position         = default and UDim2.new(1,-22,0.5,-10) or UDim2.new(0,2,0.5,-10)
+    knob.BackgroundColor3 = Color3.new(1,1,1)
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1,0)
+
+    local btn = Instance.new("TextButton", f)
+    btn.Size             = UDim2.new(1,0,1,0)
+    btn.BackgroundTransparency = 1
+    btn.Text             = ""
+    btn.MouseButton1Click:Connect(function()
+        default = not default
+        TweenService:Create(knob, TweenInfo.new(0.2), {Position = default
+            and UDim2.new(1,-22,0.5,-10)
+            or UDim2.new(0,2,0.5,-10)
+        }):Play()
+        TweenService:Create(bg, TweenInfo.new(0.2), {BackgroundColor3 = default
+            and Color3.fromRGB(0,120,215)
+            or Color3.fromRGB(60,60,70)
+        }):Play()
+        callback(default)
+    end)
+end
+
+-- Bug effect toggle
+createToggle(content, "Bug effect",    true,  0, function(val)
+    bugEffectEnabled = val
+    if val then liquidEffectEnabled = false end
+    clearHighlight()
+end)
+-- Liquid effect toggle
+createToggle(content, "Liquid effect", false, 40, function(val)
+    liquidEffectEnabled = val
+    if val then
+        bugEffectEnabled = false
+        clearHighlight()
+    end
+end)
+
+-- Clear all bugs button
+local clearBtn = Instance.new("TextButton", content)
+clearBtn.Size               = UDim2.new(1,0,0,32)
+clearBtn.Position           = UDim2.new(0,0,0, 88)
+clearBtn.BackgroundColor3   = Color3.fromRGB(200,80,80)
+clearBtn.Text               = "Clear all bugs"
+clearBtn.Font               = Enum.Font.GothamBold
+clearBtn.TextSize           = 16
+clearBtn.TextColor3         = Color3.new(1,1,1)
+clearBtn.BorderSizePixel    = 0
+Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0,8)
+clearBtn.MouseButton1Click:Connect(function()
+    for _, inst in ipairs(ActiveParts:GetChildren()) do
+        if inst.Name == "Block - Slate" then
+            pcall(DeleteAsset.InvokeServer, DeleteAsset, inst)
+        end
+    end
+end)
+
+-- Open Button
+local openBtn = Instance.new("TextButton", screenGui)
+openBtn.Name               = "OpenButton"
+openBtn.Size               = UDim2.new(0,32,0,100)
+openBtn.Position           = UDim2.new(0,0,0.5,-50)
+openBtn.AnchorPoint        = Vector2.new(0,0.5)
+openBtn.BackgroundColor3   = Color3.fromRGB(30,30,30)
+openBtn.Text               = "Nil"
+openBtn.Font               = Enum.Font.GothamBold
+openBtn.TextSize           = 18
+openBtn.TextColor3         = Color3.new(1,1,1)
+openBtn.BorderSizePixel    = 0
+Instance.new("UICorner", openBtn).CornerRadius = UDim.new(0,8)
+openBtn.Visible = false
+
+openBtn.MouseButton1Click:Connect(function()
+    openBtn.Visible   = false
+    mainFrame.Visible = true
+end)
+
+minimizeBtn.MouseButton1Click:Connect(function()
+    mainFrame.Visible = false
+    openBtn.Visible   = true
+end)
