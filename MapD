@@ -1,0 +1,216 @@
+-- MapDestroyer_UI.lua
+-- LocalScript (StarterPlayerScripts)
+-- “Map Destroyer”: UI toggle to bug all other players and disable/enable collisions on all non-character parts.
+
+--------------------------------------------------------------------------------
+-- SERVICES & CONFIGURATION
+--------------------------------------------------------------------------------
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage= game:GetService("ReplicatedStorage")
+
+local BUG_ASSET_ID     = 41324945
+local BUG_ASSET_UID    = "{99ab22df-ca29-4143-a2fd-Oa1b79db78c2}"
+
+--------------------------------------------------------------------------------
+-- REMOTES
+--------------------------------------------------------------------------------
+local Remotes    = ReplicatedStorage:WaitForChild("Remotes")
+local StampAsset = Remotes:WaitForChild("StampAsset")
+
+--------------------------------------------------------------------------------
+-- STATE
+--------------------------------------------------------------------------------
+local enabled = false  -- starts off
+
+--------------------------------------------------------------------------------
+-- LOOKUP LOCAL PLATE & ACTIVEPARTS
+--------------------------------------------------------------------------------
+local function findLocalPlate()
+    local plates = workspace:WaitForChild("Plates")
+    local me     = Players.LocalPlayer
+    for _, pf in ipairs(plates:GetChildren()) do
+        if pf:FindFirstChild("Owner") and pf.Owner.Value == me then
+            return pf:FindFirstChild("Plate"), pf:FindFirstChild("ActiveParts")
+        end
+    end
+end
+local LPlate, ActiveParts = findLocalPlate()
+assert(LPlate and ActiveParts, "MapDestroyer: local plate or ActiveParts not found")
+
+--------------------------------------------------------------------------------
+-- BUG FUNCTION
+--------------------------------------------------------------------------------
+local function bugPlayer(plr)
+    if not enabled or plr == Players.LocalPlayer then return end
+    local char = plr.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    StampAsset:InvokeServer(
+        BUG_ASSET_ID,
+        LPlate.CFrame + Vector3.new(0, -1e21, 0),
+        BUG_ASSET_UID,
+        { hrp },
+        0
+    )
+end
+
+--------------------------------------------------------------------------------
+-- PLAYER WATCHER
+--------------------------------------------------------------------------------
+local function watchPlayer(plr)
+    if plr == Players.LocalPlayer then return end
+    plr.CharacterAdded:Connect(function()
+        task.wait(0.1)
+        bugPlayer(plr)
+    end)
+    if plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+        task.delay(0.1, function() bugPlayer(plr) end)
+    end
+end
+for _, plr in ipairs(Players:GetPlayers()) do watchPlayer(plr) end
+Players.PlayerAdded:Connect(watchPlayer)
+
+--------------------------------------------------------------------------------
+-- COLLISION TOGGLE FOR NON-CHARACTER PARTS
+--------------------------------------------------------------------------------
+-- Set CanCollide = state on every BasePart that is not under any player's Character
+local function setWorldCollision(state)
+    for _, part in ipairs(workspace:GetDescendants()) do
+        if part:IsA("BasePart") then
+            -- ignore any player character parts
+            local isPlayerPart = false
+            for _, plr in ipairs(Players:GetPlayers()) do
+                local char = plr.Character
+                if char and part:IsDescendantOf(char) then
+                    isPlayerPart = true
+                    break
+                end
+            end
+            if not isPlayerPart then
+                part.CanCollide = state
+            end
+        end
+    end
+end
+
+-- When new parts appear in the world, apply current collision state
+workspace.DescendantAdded:Connect(function(part)
+    if part:IsA("BasePart") and enabled then
+        -- skip player parts
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr.Character and part:IsDescendantOf(plr.Character) then
+                return
+            end
+        end
+        part.CanCollide = false
+    end
+end)
+
+--------------------------------------------------------------------------------
+-- UI CREATION
+--------------------------------------------------------------------------------
+local player = Players.LocalPlayer
+local gui = Instance.new("ScreenGui")
+gui.Name = "MapDestroyerUI"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+-- Main Frame
+local frame = Instance.new("Frame", gui)
+frame.Name             = "MainFrame"
+frame.Size             = UDim2.new(0, 200, 0, 100)
+frame.Position         = UDim2.new(0.5, -100, 0.2, 0)
+frame.BackgroundColor3 = Color3.fromRGB(25,25,30)
+frame.BorderSizePixel  = 0
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0,8)
+
+-- Title Bar
+local titleBar = Instance.new("Frame", frame)
+titleBar.Name             = "TitleBar"
+titleBar.Size             = UDim2.new(1,0,0,30)
+titleBar.Position         = UDim2.new(0,0,0,0)
+titleBar.BackgroundColor3 = Color3.fromRGB(20,20,25)
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0,8)
+
+local titleLabel = Instance.new("TextLabel", titleBar)
+titleLabel.Size              = UDim2.new(1,-10,1,0)
+titleLabel.Position          = UDim2.new(0,5,0,0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text              = "Map Destroyer"
+titleLabel.Font              = Enum.Font.GothamBold
+titleLabel.TextSize          = 16
+titleLabel.TextColor3        = Color3.fromRGB(240,240,240)
+titleLabel.TextXAlignment    = Enum.TextXAlignment.Left
+
+-- Toggle Button
+local toggleBtn = Instance.new("TextButton", frame)
+toggleBtn.Name             = "ToggleButton"
+toggleBtn.Size             = UDim2.new(1,-20,0,36)
+toggleBtn.Position         = UDim2.new(0,10,0,40)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(150,150,150)
+toggleBtn.Font             = Enum.Font.GothamBold
+toggleBtn.TextSize         = 16
+toggleBtn.TextColor3       = Color3.fromRGB(255,255,255)
+toggleBtn.BorderSizePixel  = 0
+Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0,6)
+toggleBtn.Text = "Enable"
+
+-- Draggable
+do
+    local dragging, dragInput, dragStart, startPos
+    local function update(input)
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+    titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    titleBar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then update(input) end
+    end)
+end
+
+--------------------------------------------------------------------------------
+-- TOGGLE BEHAVIOR
+--------------------------------------------------------------------------------
+toggleBtn.MouseButton1Click:Connect(function()
+    enabled = not enabled
+    if enabled then
+        toggleBtn.Text = "Disable"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(200,60,60)
+        -- bug all existing players
+        for _, plr in ipairs(Players:GetPlayers()) do
+            bugPlayer(plr)
+        end
+        -- disable collisions on all non-character parts
+        setWorldCollision(false)
+    else
+        toggleBtn.Text = "Enable"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(150,150,150)
+        -- re-enable collisions on all non-character parts
+        setWorldCollision(true)
+    end
+end)
