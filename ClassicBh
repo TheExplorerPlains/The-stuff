@@ -1,0 +1,1363 @@
+-- Advanced BlackHole System vFinal with Advanced Guardian, Multi-Select, Suction, Hide, BOB & Linking
+-- Features:
+--   • Responsive UI (auto-scaled, centered, scrolling) with two columns.
+--   • A single folder ("BlackHoleFolder") holds all blackhole parts.
+--   • Physics functions: suction (with pulsing), orbit, explosion, drag, follow, chase.
+--   • Advanced guardian behavior (with modes, including vengeance) and multi-select.
+--   • "Hide Blackhole": Toggles the selected blackhole(s) to move 50 studs below the player.
+--   • "BOB": With a primary blackhole (set via "Set Primary"), other blackholes orbit it at a speed set by bobSpeed.
+--   • "Blackhole Linking": When at least two blackholes are selected (via multi‑select),
+--         a loop randomly transfers parts from one blackhole’s network to another.
+--         During linking the selector shows a single green “Blackhole Link” element.
+--         Pressing the button again stops linking and reverts the selector.
+--   • "Linking Speed" slider: Control how fast the linking loop runs (max = 100).
+
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+
+--------------------------------------------------------------------------------
+-- BLACKHOLE FOLDER SETUP
+--------------------------------------------------------------------------------
+local BHFolder = Instance.new("Folder", Workspace)
+BHFolder.Name = "BlackHoleFolder"
+
+--------------------------------------------------------------------------------
+-- CONFIGURATION & STATE VARIABLES
+--------------------------------------------------------------------------------
+local orbitSpeed = 1      -- Orbit speed slider (left column)
+local orbitRadius = 15    -- Orbit radius slider (left column)
+local bobSpeed = 5        -- Bob speed (replaces roamSpeed)
+local gravitationalConstant = 1000
+local repulsiveMode = false
+local pulseMultiplier = 1
+local pulseInterval = 5
+local pulseDuration = 1
+
+local blackHoleActive = true    -- Overall suction ON/OFF
+local orbitActive = false
+local dragModeActive = false
+local followSelectedActive = false
+local followAllActive = false
+
+-- Chase connection variables
+local chaseSelectedConn = nil
+local chaseAllConn = nil
+local autoChaseConn = nil
+
+-- Guardian multi-selection mode variables:
+local multiSelectionMode = false
+local selectedBlackholes = {}  -- When multi-select is on
+local selectedBlackhole = nil    -- When multi-select is off
+
+-- Variable to store the killer (for vengeance mode)
+local localKiller = nil
+
+-- For BOB mode, designate a primary blackhole (others orbit it)
+local primaryBlackhole = nil
+
+-- For linking functionality
+local linkingActive = false
+local linkingCoroutine = nil
+
+-- New variable for linking speed control.
+local linkingSpeed = 1
+
+--------------------------------------------------------------------------------
+-- BLACKHOLE CORE MANAGEMENT & NETWORKS
+--------------------------------------------------------------------------------
+local blackholeList = {}
+
+local function partExistsInAnyNetwork(part)
+    if not blackholeList then return false end
+    for _, bh in ipairs(blackholeList) do
+        if bh and bh.Network and bh.Network.BaseParts and table.find(bh.Network.BaseParts, part) then
+            return true
+        end
+    end
+    return false
+end
+
+local function RetainPartForBlackhole(bh, part)
+    if not partExistsInAnyNetwork(part) then
+        table.insert(bh.Network.BaseParts, part)
+        part.CustomPhysicalProperties = PhysicalProperties.new(0.0001, 0, 0, 0, 0)
+        part.CanCollide = false
+    end
+end
+
+Workspace.DescendantAdded:Connect(function(desc)
+    if desc:IsA("BasePart") and not desc.Anchored and desc.Parent ~= BHFolder then
+        if LocalPlayer.Character and desc:IsDescendantOf(LocalPlayer.Character) then return end
+        if not partExistsInAnyNetwork(desc) then
+            local targetBH = (not multiSelectionMode and (selectedBlackhole or blackholeList[1])) or (selectedBlackholes[1] or blackholeList[1])
+            if targetBH then
+                RetainPartForBlackhole(targetBH, desc)
+                ForcePart(desc, targetBH.Attachment)
+            end
+        end
+    end
+end)
+
+--------------------------------------------------------------------------------
+-- UTILITY FUNCTIONS
+--------------------------------------------------------------------------------
+RunService.Heartbeat:Connect(function()
+    if not multiSelectionMode and selectedBlackhole then
+        for _, part in ipairs(selectedBlackhole.Network.BaseParts) do
+            if part:IsDescendantOf(Workspace) then
+                local alignPos = part:FindFirstChildWhichIsA("AlignPosition")
+                if alignPos then alignPos.Attachment1 = selectedBlackhole.Attachment end
+            end
+        end
+    elseif multiSelectionMode then
+        for _, bh in ipairs(selectedBlackholes) do
+            for _, part in ipairs(bh.Network.BaseParts) do
+                if part:IsDescendantOf(Workspace) then
+                    local alignPos = part:FindFirstChildWhichIsA("AlignPosition")
+                    if alignPos then alignPos.Attachment1 = bh.Attachment end
+                end
+            end
+        end
+    end
+end)
+
+function ForcePart(part, attachment)
+    if not part.Parent then return end  -- Avoid indexing nil.
+    if part:IsDescendantOf(BHFolder) then return end
+    if LocalPlayer.Character and part:IsDescendantOf(LocalPlayer.Character) then return end
+    if part:IsA("Part") and not part.Anchored and not part.Parent:FindFirstChild("Humanoid")
+       and not part.Parent:FindFirstChild("Head") and part.Name ~= "Handle" then
+        for _, x in ipairs(part:GetChildren()) do
+            if x:IsA("BodyAngularVelocity") or x:IsA("BodyForce") or x:IsA("BodyGyro")
+               or x:IsA("BodyPosition") or x:IsA("BodyThrust") or x:IsA("BodyVelocity")
+               or x:IsA("RocketPropulsion") then
+                x:Destroy()
+            end
+        end
+        part.CanCollide = false
+        local torque = Instance.new("Torque", part)
+        torque.Torque = Vector3.new(100000,100000,100000)
+        local alignPos = Instance.new("AlignPosition", part)
+        local attach2 = Instance.new("Attachment", part)
+        torque.Attachment0 = attach2
+        alignPos.MaxForce = 9e15
+        alignPos.MaxVelocity = math.huge
+        alignPos.Responsiveness = 200
+        alignPos.Attachment0 = attach2
+        alignPos.Attachment1 = attachment or (selectedBlackhole and selectedBlackhole.Attachment or nil)
+    end
+end
+
+local function createBlackHole()
+    if not LocalPlayer.Character then return end
+    local character = LocalPlayer.Character
+    local torso = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso") or character:FindFirstChild("HumanoidRootPart")
+    local pos = torso and torso.Position or Vector3.new(0,50,0)
+    local bh = Instance.new("Part", BHFolder)
+    bh.Name = "Blackhole" .. (#blackholeList + 1)
+    bh.Size = Vector3.new(4,4,4)
+    bh.Anchored = true
+    bh.CanCollide = false
+    bh.Transparency = 1
+    bh.CFrame = CFrame.new(pos)
+    local att = Instance.new("Attachment", bh)
+    local newBH = {Part = bh, Attachment = att, Name = bh.Name, Network = { BaseParts = {} },
+                     GuardianMode = "off", GuardOffset = nil, BOBMode = false, BobPhase = nil, Hidden = false}
+    table.insert(blackholeList, newBH)
+    return newBH
+end
+
+--------------------------------------------------------------------------------
+-- EXPLOSION FUNCTIONS (UPDATED)
+--------------------------------------------------------------------------------
+local function explodeSelected()
+    if not multiSelectionMode then
+        if selectedBlackhole then
+            for _, part in ipairs(selectedBlackhole.Network.BaseParts) do
+                if part:IsDescendantOf(Workspace) then
+                    for _, child in ipairs(part:GetChildren()) do
+                        if child:IsA("AlignPosition") or child:IsA("Torque") then child:Destroy() end
+                    end
+                    local randomDirection = Vector3.new(math.random()-0.5, math.random()-0.5, math.random()-0.5).Unit
+                    local speed = math.random(500, 1500)
+                    part.Velocity = randomDirection * speed
+                end
+            end
+            selectedBlackhole.Network.BaseParts = {}
+        end
+    else
+        for _, bh in ipairs(selectedBlackholes) do
+            for _, part in ipairs(bh.Network.BaseParts) do
+                if part:IsDescendantOf(Workspace) then
+                    for _, child in ipairs(part:GetChildren()) do
+                        if child:IsA("AlignPosition") or child:IsA("Torque") then child:Destroy() end
+                    end
+                    local randomDirection = Vector3.new(math.random()-0.5, math.random()-0.5, math.random()-0.5).Unit
+                    local speed = math.random(500, 1500)
+                    part.Velocity = randomDirection * speed
+                end
+            end
+            bh.Network.BaseParts = {}
+        end
+    end
+end
+
+local function explodeAll()
+    for _, bh in ipairs(blackholeList or {}) do
+        for _, part in ipairs(bh.Network.BaseParts) do
+            if part:IsDescendantOf(Workspace) then
+                for _, child in ipairs(part:GetChildren()) do
+                    if child:IsA("AlignPosition") or child:IsA("Torque") then child:Destroy() end
+                end
+                local randomDirection = Vector3.new(math.random()-0.5, math.random()-0.5, math.random()-0.5).Unit
+                local speed = math.random(500, 1500)
+                part.Velocity = randomDirection * speed
+            end
+        end
+        bh.Network.BaseParts = {}
+    end
+end
+
+--------------------------------------------------------------------------------
+-- NEW BUTTON FUNCTIONALITY: HIDE BLACKHOLE
+--------------------------------------------------------------------------------
+local function toggleHideBlackhole(bh)
+    if not bh then return end
+    if not bh.Hidden then
+        bh.Hidden = true
+        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then bh.Part.CFrame = CFrame.new(hrp.Position - Vector3.new(0,50,0)) end
+    else
+        bh.Hidden = false
+    end
+end
+
+--------------------------------------------------------------------------------
+-- NEW BUTTON FUNCTIONALITY: SET PRIMARY & BOB
+--------------------------------------------------------------------------------
+local function setPrimary()
+    if not multiSelectionMode then
+        if selectedBlackhole then primaryBlackhole = selectedBlackhole end
+    else
+        if #selectedBlackholes > 0 then primaryBlackhole = selectedBlackholes[1] end
+    end
+end
+
+local function toggleBOB()
+    if not primaryBlackhole then return end
+    for _, bh in ipairs(blackholeList) do
+        if bh ~= primaryBlackhole then
+            bh.BOBMode = not bh.BOBMode
+            if bh.BOBMode then bh.BobPhase = math.random() * math.pi * 2 end
+        end
+    end
+end
+
+--------------------------------------------------------------------------------
+-- NEW BUTTON FUNCTIONALITY: BLACKHOLE LINKING
+--------------------------------------------------------------------------------
+local function startLinking()
+    linkingActive = true
+    linkingCoroutine = spawn(function()
+        while linkingActive do
+            local waitTime = math.random(10, 100) / 100
+            -- Divide wait time by linkingSpeed so higher slider values speed up the loop.
+            wait(waitTime / linkingSpeed)
+            local linked = multiSelectionMode and selectedBlackholes or {}
+            if #linked < 2 then
+                linkingActive = false
+                break
+            end
+
+            -- Shuffle the indexes to pick two distinct blackholes
+            local randomIndexes = {}
+            for i = 1, #linked do table.insert(randomIndexes, i) end
+            for i = #randomIndexes, 2, -1 do
+                local j = math.random(1, i)
+                randomIndexes[i], randomIndexes[j] = randomIndexes[j], randomIndexes[i]
+            end
+            local sourceBH = linked[randomIndexes[1]]
+            local destBH = linked[randomIndexes[2]]
+
+            local availableParts = {}
+            for _, part in ipairs(sourceBH.Network.BaseParts) do
+                if not part:GetAttribute("TransferLocked") then
+                    table.insert(availableParts, part)
+                end
+            end
+            if #availableParts > 0 then
+                local partToTransfer = availableParts[math.random(1, #availableParts)]
+                partToTransfer:SetAttribute("TransferLocked", true)
+                for i, p in ipairs(sourceBH.Network.BaseParts) do
+                    if p == partToTransfer then table.remove(sourceBH.Network.BaseParts, i) break end
+                end
+                table.insert(destBH.Network.BaseParts, partToTransfer)
+                -- Update the part's alignment to the destination blackhole core.
+                local alignPos = partToTransfer:FindFirstChildWhichIsA("AlignPosition")
+                if alignPos then
+                    alignPos.Attachment1 = destBH.Attachment
+                else
+                    ForcePart(partToTransfer, destBH.Attachment)
+                end
+                spawn(function()
+                    while (partToTransfer.Position - destBH.Attachment.WorldPosition).Magnitude > 5 do
+                        wait(0.1)
+                    end
+                    partToTransfer:SetAttribute("TransferLocked", false)
+                end)
+            end
+        end
+    end)
+end
+
+local function stopLinking()
+    linkingActive = false
+    linkingCoroutine = nil
+end
+
+--------------------------------------------------------------------------------
+-- SUCTION PHYSICS (Re-added)
+--------------------------------------------------------------------------------
+spawn(function()
+    while true do
+        wait(pulseInterval)
+        pulseMultiplier = 2
+        wait(pulseDuration)
+        pulseMultiplier = 1
+    end
+end)
+
+spawn(function()
+    while true do
+        local dt = RunService.Heartbeat:Wait()
+        if blackHoleActive then
+            if not multiSelectionMode and selectedBlackhole then
+                local targetPos = selectedBlackhole.Attachment.WorldPosition
+                for _, part in ipairs(selectedBlackhole.Network.BaseParts) do
+                    if part:IsDescendantOf(Workspace) and not part.Exploded then
+                        local direction = targetPos - part.Position
+                        local distance = direction.Magnitude
+                        if distance < 100 then
+                            local mass = part.AssemblyMass or 1
+                            local forceMag = (gravitationalConstant * pulseMultiplier) / (distance^2 + 1)
+                            local mult = repulsiveMode and -1 or 1
+                            local forceVec = direction.Unit * forceMag * mult
+                            local accel = forceVec / mass
+                            part.Velocity = part.Velocity + accel * dt
+                        end
+                    end
+                end
+            elseif multiSelectionMode then
+                for _, bh in ipairs(selectedBlackholes) do
+                    local targetPos = bh.Attachment.WorldPosition
+                    for _, part in ipairs(bh.Network.BaseParts) do
+                        if part:IsDescendantOf(Workspace) and not part.Exploded then
+                            local direction = targetPos - part.Position
+                            local distance = direction.Magnitude
+                            if distance < 100 then
+                                local mass = part.AssemblyMass or 1
+                                local forceMag = (gravitationalConstant * pulseMultiplier) / (distance^2 + 1)
+                                local mult = repulsiveMode and -1 or 1
+                                local forceVec = direction.Unit * forceMag * mult
+                                local accel = forceVec / mass
+                                part.Velocity = part.Velocity + accel * dt
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+--------------------------------------------------------------------------------
+-- UI CREATION (Two Columns & Scrolling)
+--------------------------------------------------------------------------------
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "BlackHoleControlGUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame", ScreenGui)
+mainFrame.Name = "ControlFrame"
+mainFrame.Size = UDim2.new(0.9, 0, 0.9, 0)
+mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30,30,30)
+mainFrame.BackgroundTransparency = 0.1
+mainFrame.BorderSizePixel = 0
+mainFrame.Draggable = true
+local mainCorner = Instance.new("UICorner", mainFrame)
+mainCorner.CornerRadius = UDim.new(0,20)
+local mainGradient = Instance.new("UIGradient", mainFrame)
+mainGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(40,40,40)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(20,20,20))
+}
+local mainStroke = Instance.new("UIStroke", mainFrame)
+mainStroke.Color = Color3.fromRGB(80,80,80)
+mainStroke.Thickness = 3
+
+local mainLayout = Instance.new("UIListLayout", mainFrame)
+mainLayout.Padding = UDim.new(0, 10)
+mainLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+local title = Instance.new("TextLabel", mainFrame)
+title.Size = UDim2.new(1, -20, 0, 60)
+title.BackgroundTransparency = 1
+title.Text = "Advanced BlackHole Control"
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.GothamBold
+title.TextScaled = true
+
+local scrollFrame = Instance.new("ScrollingFrame", mainFrame)
+scrollFrame.Size = UDim2.new(1, -20, 1, -80)
+scrollFrame.Position = UDim2.new(0, 10, 0, 65)
+scrollFrame.CanvasSize = UDim2.new(0, 0, 2, 0)
+scrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scrollFrame.BackgroundTransparency = 1
+
+local columns = Instance.new("Frame", scrollFrame)
+columns.Size = UDim2.new(1, 0, 0, 0)
+columns.BackgroundTransparency = 1
+
+local leftCol = Instance.new("Frame", columns)
+leftCol.Size = UDim2.new(0.48, 0, 0, 0)
+leftCol.AutomaticSize = Enum.AutomaticSize.Y
+leftCol.BackgroundTransparency = 1
+
+local rightCol = Instance.new("Frame", columns)
+rightCol.Size = UDim2.new(0.48, 0, 0, 0)
+rightCol.Position = UDim2.new(0.52, 0, 0, 0)
+rightCol.AutomaticSize = Enum.AutomaticSize.Y
+rightCol.BackgroundTransparency = 1
+
+local leftLayout = Instance.new("UIListLayout", leftCol)
+leftLayout.Padding = UDim.new(0, 10)
+local rightLayout = Instance.new("UIListLayout", rightCol)
+rightLayout.Padding = UDim.new(0, 10)
+
+if UserInputService.TouchEnabled then
+    mainFrame.Size = UDim2.new(0.95, 0, 0.95, 0)
+    title.TextScaled = false
+    title.TextSize = 36
+end
+
+--------------------------------------------------------------------------------
+-- NEW SLIDER CREATION FUNCTION (Modern UI Replacement)
+--------------------------------------------------------------------------------
+local function createNewSlider(parent, titleText, minValue, maxValue, defaultValue, callback)
+    local config = {
+        sliderWidth = 300,
+        sliderHeight = 12,
+        knobSize = 24,
+        minimumValue = minValue,
+        maximumValue = maxValue,
+        defaultValue = defaultValue,
+        decimalPlaces = 0,
+        backgroundColor = Color3.fromRGB(40,40,40),
+        fillColor = Color3.fromRGB(0,162,255),
+        knobColor = Color3.fromRGB(255,255,255),
+        knobBorderColor = Color3.fromRGB(200,200,200),
+        textColor = Color3.fromRGB(255,255,255),
+        tweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        hoverTweenInfo = TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        useShadow = true,
+        shadowTransparency = 0.7,
+        useValueLabel = true,
+        onValueChanged = callback or function(value) print("Value changed to: " .. value) end,
+    }
+    
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "NewSliderGui"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = parent
+    
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "SliderMainFrame"
+    mainFrame.Size = UDim2.new(0, config.sliderWidth + 20, 0, config.sliderHeight + 50)
+    mainFrame.BackgroundTransparency = 1
+    mainFrame.Parent = screenGui
+    
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Name = "TitleLabel"
+    titleLabel.Size = UDim2.new(1, 0, 0, 20)
+    titleLabel.Position = UDim2.new(0, 0, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Font = Enum.Font.GothamSemibold
+    titleLabel.TextSize = 14
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.TextColor3 = config.textColor
+    titleLabel.Text = titleText
+    titleLabel.Parent = mainFrame
+    
+    local sliderBackground = Instance.new("Frame")
+    sliderBackground.Name = "SliderBackground"
+    sliderBackground.Size = UDim2.new(0, config.sliderWidth, 0, config.sliderHeight)
+    sliderBackground.Position = UDim2.new(0, 0, 0, 25)
+    sliderBackground.BackgroundColor3 = config.backgroundColor
+    sliderBackground.BorderSizePixel = 0
+    sliderBackground.Parent = mainFrame
+    sliderBackground.ClipsDescendants = true
+    
+    local backgroundCorner = Instance.new("UICorner")
+    backgroundCorner.CornerRadius = UDim.new(0, config.sliderHeight / 2)
+    backgroundCorner.Parent = sliderBackground
+    
+    if config.useShadow then
+        local shadow = Instance.new("ImageLabel")
+        shadow.Name = "Shadow"
+        shadow.Size = UDim2.new(1, 6, 1, 6)
+        shadow.Position = UDim2.new(0, -3, 0, -3)
+        shadow.BackgroundTransparency = 1
+        shadow.Image = "rbxassetid://1316045217"
+        shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+        shadow.ImageTransparency = config.shadowTransparency
+        shadow.ScaleType = Enum.ScaleType.Slice
+        shadow.SliceCenter = Rect.new(10, 10, 118, 118)
+        shadow.ZIndex = 0
+        shadow.Parent = sliderBackground
+    end
+    
+    local sliderFill = Instance.new("Frame")
+    sliderFill.Name = "SliderFill"
+    sliderFill.Size = UDim2.new(defaultValue / (maxValue - minValue), 0, 1, 0)
+    sliderFill.BackgroundColor3 = config.fillColor
+    sliderFill.BorderSizePixel = 0
+    sliderFill.Parent = sliderBackground
+    sliderFill.ClipsDescendants = true
+    
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(0, config.sliderHeight / 2)
+    fillCorner.Parent = sliderFill
+    
+    local sliderKnob = Instance.new("Frame")
+    sliderKnob.Name = "SliderKnob"
+    sliderKnob.Size = UDim2.new(0, config.knobSize, 0, config.knobSize)
+    sliderKnob.Position = UDim2.new(defaultValue / (maxValue - minValue), 0, 0.5, 0)
+    sliderKnob.AnchorPoint = Vector2.new(0.5, 0.5)
+    sliderKnob.BackgroundColor3 = config.knobColor
+    sliderKnob.BorderSizePixel = 0
+    sliderKnob.ZIndex = 2
+    sliderKnob.Parent = sliderBackground
+    
+    local knobShadow = Instance.new("ImageLabel")
+    knobShadow.Name = "KnobShadow"
+    knobShadow.Size = UDim2.new(1, 6, 1, 6)
+    knobShadow.Position = UDim2.new(0, -3, 0, -3)
+    knobShadow.BackgroundTransparency = 1
+    knobShadow.Image = "rbxassetid://1316045217"
+    knobShadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+    knobShadow.ImageTransparency = 0.6
+    knobShadow.ScaleType = Enum.ScaleType.Slice
+    knobShadow.SliceCenter = Rect.new(10, 10, 118, 118)
+    knobShadow.ZIndex = 1
+    knobShadow.Parent = sliderKnob
+    
+    local knobCorner = Instance.new("UICorner")
+    knobCorner.CornerRadius = UDim.new(0, config.knobSize / 2)
+    knobCorner.Parent = sliderKnob
+    
+    local knobStroke = Instance.new("UIStroke")
+    knobStroke.Color = config.knobBorderColor
+    knobStroke.Thickness = 1
+    knobStroke.Transparency = 0.2
+    knobStroke.Parent = sliderKnob
+    
+    local valueLabel
+    if config.useValueLabel then
+        valueLabel = Instance.new("TextLabel")
+        valueLabel.Name = "ValueLabel"
+        valueLabel.Size = UDim2.new(0, 50, 0, 20)
+        valueLabel.Position = UDim2.new(1, 10, 0, 25 + (config.sliderHeight / 2) - 10)
+        valueLabel.BackgroundTransparency = 1
+        valueLabel.Font = Enum.Font.GothamMedium
+        valueLabel.TextSize = 14
+        valueLabel.TextColor3 = config.textColor
+        valueLabel.Text = tostring(defaultValue)
+        valueLabel.TextXAlignment = Enum.TextXAlignment.Left
+        valueLabel.Parent = mainFrame
+    end
+    
+    local currentValue = defaultValue
+    local function updateSlider(percentage)
+        percentage = math.clamp(percentage, 0, 1)
+        local newValue = minValue + ((maxValue - minValue) * percentage)
+        newValue = math.floor(newValue + 0.5)
+        if newValue ~= currentValue then
+            currentValue = newValue
+            TweenService:Create(sliderFill, config.tweenInfo, {Size = UDim2.new(percentage, 0, 1, 0)}):Play()
+            TweenService:Create(sliderKnob, config.tweenInfo, {Position = UDim2.new(percentage, 0, 0.5, 0)}):Play()
+            if valueLabel then valueLabel.Text = tostring(currentValue) end
+            config.onValueChanged(currentValue)
+        end
+    end
+    
+    local isDragging = false
+    sliderBackground.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            isDragging = true
+            local relativePosition = input.Position.X - sliderBackground.AbsolutePosition.X
+            local percentage = math.clamp(relativePosition / sliderBackground.AbsoluteSize.X, 0, 1)
+            updateSlider(percentage)
+        end
+    end)
+    
+    UserInputService.InputEnded:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and isDragging then
+            isDragging = false
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) and isDragging then
+            local relativePosition = input.Position.X - sliderBackground.AbsolutePosition.X
+            local percentage = math.clamp(relativePosition / sliderBackground.AbsoluteSize.X, 0, 1)
+            updateSlider(percentage)
+        end
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            local mousePosition = UserInputService:GetMouseLocation()
+            local knobPos = sliderKnob.AbsolutePosition
+            local knobSize = sliderKnob.AbsoluteSize
+            local distance = ((mousePosition.X - (knobPos.X + knobSize.X/2))^2 + (mousePosition.Y - (knobPos.Y + knobSize.Y/2))^2)^0.5
+            if distance <= knobSize.X/2 * 1.5 and not isDragging then
+                TweenService:Create(sliderKnob, config.hoverTweenInfo, {
+                    Size = UDim2.new(0, config.knobSize * 1.1, 0, config.knobSize * 1.1),
+                    BackgroundColor3 = Color3.fromRGB(255,255,255)
+                }):Play()
+            else
+                TweenService:Create(sliderKnob, config.hoverTweenInfo, {
+                    Size = UDim2.new(0, config.knobSize, 0, config.knobSize),
+                    BackgroundColor3 = config.knobColor
+                }):Play()
+            end
+        end
+    end)
+    
+    local sliderAPI = {}
+    function sliderAPI:SetValue(value)
+        local percentage = (math.clamp(value, minValue, maxValue) - minValue) / (maxValue - minValue)
+        updateSlider(percentage)
+        return sliderAPI
+    end
+    function sliderAPI:GetValue() return currentValue end
+    function sliderAPI:SetTitle(newTitle)
+        titleLabel.Text = newTitle
+        return sliderAPI
+    end
+    function sliderAPI:SetColors(bgColor, fillColor, knobColor)
+        if bgColor then sliderBackground.BackgroundColor3 = bgColor end
+        if fillColor then sliderFill.BackgroundColor3 = fillColor end
+        if knobColor then sliderKnob.BackgroundColor3 = knobColor end
+        return sliderAPI
+    end
+    function sliderAPI:SetRange(min, max)
+        config.minimumValue = min
+        config.maximumValue = max
+        updateSlider((currentValue - min) / (max - min))
+        return sliderAPI
+    end
+    function sliderAPI:SetCallback(cb)
+        config.onValueChanged = cb
+        return sliderAPI
+    end
+    function sliderAPI:Destroy() screenGui:Destroy() end
+    
+    return sliderAPI, mainFrame
+end
+
+--------------------------------------------------------------------------------
+-- UI CONTROL CREATION FUNCTIONS (Left Column: Essential Controls)
+--------------------------------------------------------------------------------
+local function createToggleButton(parent, name, text)
+    local btn = Instance.new("TextButton", parent)
+    btn.Size = UDim2.new(1, 0, 0, 40)
+    btn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.Text = text
+    btn.Font = Enum.Font.GothamBold
+    btn.TextScaled = true
+    local corner = Instance.new("UICorner", btn)
+    corner.CornerRadius = UDim.new(0,12)
+    local stroke = Instance.new("UIStroke", btn)
+    stroke.Color = Color3.fromRGB(90,90,90)
+    stroke.Thickness = 2
+    btn.MouseEnter:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(70,70,70)}):Play()
+    end)
+    btn.MouseLeave:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(50,50,50)}):Play()
+    end)
+    return btn
+end
+
+--------------------------------------------------------------------------------
+-- BLACKHOLE SELECTOR UI
+--------------------------------------------------------------------------------
+local selectorFrame = Instance.new("Frame", mainFrame)
+selectorFrame.Size = UDim2.new(0.9, 0, 0.2, 0)
+selectorFrame.Position = UDim2.new(0.05, 0, 0.75, 0)
+selectorFrame.BackgroundColor3 = Color3.fromRGB(20,20,20)
+selectorFrame.BackgroundTransparency = 0.2
+local selectorCorner = Instance.new("UICorner", selectorFrame)
+selectorCorner.CornerRadius = UDim.new(0,12)
+
+local selectorTitle = Instance.new("TextLabel", selectorFrame)
+selectorTitle.Size = UDim2.new(1, 0, 0, 30)
+selectorTitle.BackgroundTransparency = 1
+selectorTitle.Text = "Blackhole Selector"
+selectorTitle.TextColor3 = Color3.new(1,1,1)
+selectorTitle.Font = Enum.Font.GothamBold
+selectorTitle.TextScaled = true
+
+local listContainer = Instance.new("ScrollingFrame", selectorFrame)
+listContainer.Size = UDim2.new(1, -10, 1, -40)
+listContainer.Position = UDim2.new(0, 5, 0, 35)
+listContainer.CanvasSize = UDim2.new(0, 0, 0, 30)
+listContainer.BackgroundTransparency = 1
+listContainer.ScrollBarThickness = 6
+
+function updateSelectorUI()
+    if not blackholeList then blackholeList = {} end
+    listContainer:ClearAllChildren()
+    local padding = Instance.new("UIListLayout", listContainer)
+    padding.Padding = UDim.new(0, 5)
+    padding.FillDirection = Enum.FillDirection.Horizontal
+    padding.SortOrder = Enum.SortOrder.LayoutOrder
+
+    -- If linking is active, show one green button instead of individual entries.
+    if linkingActive then
+        local linkBtn = Instance.new("TextButton", listContainer)
+        linkBtn.Size = UDim2.new(0, 130, 0, 30)
+        linkBtn.BackgroundColor3 = Color3.new(0,1,0)
+        linkBtn.Text = "Blackhole Link"
+        linkBtn.Font = Enum.Font.GothamBold
+        linkBtn.TextScaled = true
+        listContainer.CanvasSize = UDim2.new(0, 130, 0, 30)
+        return
+    end
+
+    for i, bh in ipairs(blackholeList) do
+        local btn = Instance.new("TextButton", listContainer)
+        btn.Size = UDim2.new(0, 120, 0, 30)
+        if multiSelectionMode then
+            btn.BackgroundColor3 = table.find(selectedBlackholes, bh) and Color3.fromRGB(100,180,255) or Color3.fromRGB(50,50,50)
+        else
+            btn.BackgroundColor3 = (bh == selectedBlackhole) and Color3.fromRGB(100,180,255) or Color3.fromRGB(50,50,50)
+        end
+        btn.TextColor3 = Color3.fromRGB(255,255,255)
+        btn.Text = bh.Name
+        btn.Font = Enum.Font.GothamBold
+        btn.TextScaled = true
+        btn.LayoutOrder = i
+
+        btn.MouseButton1Click:Connect(function()
+            if multiSelectionMode then
+                if table.find(selectedBlackholes, bh) then
+                    for j, selBH in ipairs(selectedBlackholes) do
+                        if selBH == bh then table.remove(selectedBlackholes, j) break end
+                    end
+                else
+                    table.insert(selectedBlackholes, bh)
+                end
+            else
+                selectedBlackhole = bh
+            end
+            updateSelectorUI()
+        end)
+    end
+    listContainer.CanvasSize = UDim2.new(0, (#blackholeList * 130), 0, 30)
+end
+
+--------------------------------------------------------------------------------
+-- UI BUTTONS & NEW SLIDERS CREATION (Left Column: Essential Controls)
+--------------------------------------------------------------------------------
+local btnCreateBH = createToggleButton(leftCol, "CreateBH", "Create New Blackhole")
+local btnRemoveBH = createToggleButton(leftCol, "RemoveBH", "Remove Selected Blackhole")
+local btnToggleSuction = createToggleButton(leftCol, "ToggleSuction", "Deactivate Suction")
+local btnOrbitBH = createToggleButton(leftCol, "OrbitBH", "Orbit All Blackholes")
+local btnRepulse = createToggleButton(leftCol, "Repulse", "Activate Repulsive Mode")
+-- New Guardian buttons
+local btnGuardian = createToggleButton(leftCol, "Guardian", "Enable Guardian (Selected)")
+local btnGuardianAll = createToggleButton(leftCol, "GuardianAll", "Enable Guardian (All)")
+-- New Multi-Select toggle
+local btnMultiSelect = createToggleButton(leftCol, "MultiSelect", "Multi-Select: OFF")
+btnMultiSelect.MouseButton1Click:Connect(function()
+    multiSelectionMode = not multiSelectionMode
+    if multiSelectionMode then
+        btnMultiSelect.Text = "Multi-Select: ON"
+        selectedBlackhole = nil
+    else
+        btnMultiSelect.Text = "Multi-Select: OFF"
+        if #selectedBlackholes > 0 then
+            selectedBlackhole = selectedBlackholes[1]
+        else
+            selectedBlackhole = blackholeList[1]
+        end
+        selectedBlackholes = {}
+    end
+    updateSelectorUI()
+end)
+-- New Hide Blackhole button
+local btnHide = createToggleButton(leftCol, "HideBH", "Hide Blackhole")
+btnHide.MouseButton1Click:Connect(function()
+    if not multiSelectionMode then
+        if selectedBlackhole then toggleHideBlackhole(selectedBlackhole) end
+    else
+        for _, bh in ipairs(selectedBlackholes) do toggleHideBlackhole(bh) end
+    end
+end)
+-- New Set Primary button for BOB
+local btnSetPrimary = createToggleButton(leftCol, "SetPrimary", "Set Primary")
+btnSetPrimary.MouseButton1Click:Connect(function() setPrimary() end)
+-- New BOB button
+local btnBOB = createToggleButton(leftCol, "BOB", "BOB")
+btnBOB.MouseButton1Click:Connect(function() toggleBOB() end)
+-- Replace roamSpeed with bobSpeed slider
+local bobSpeedSliderAPI, bobSpeedSliderFrame = createNewSlider(leftCol, "BOB Speed", 1, 20, bobSpeed, function(val) bobSpeed = val end)
+bobSpeedSliderFrame.Parent = leftCol
+local orbitSpeedSliderAPI, orbitSpeedSliderFrame = createNewSlider(leftCol, "Orbit Speed", 1, 20, orbitSpeed, function(val) orbitSpeed = val end)
+orbitSpeedSliderFrame.Parent = leftCol
+local orbitRadiusSliderAPI, orbitRadiusSliderFrame = createNewSlider(leftCol, "Orbit Radius", 5, 50, orbitRadius, function(val) orbitRadius = val end)
+orbitRadiusSliderFrame.Parent = leftCol
+-- New Linking Speed slider to control how fast the linking loop runs.
+local linkingSpeedSliderAPI, linkingSpeedSliderFrame = createNewSlider(leftCol, "Linking Speed", 1, 100, linkingSpeed, function(val) linkingSpeed = val end)
+linkingSpeedSliderFrame.Parent = leftCol
+
+--------------------------------------------------------------------------------
+-- UI BUTTONS (Right Column: Extra Functions)
+--------------------------------------------------------------------------------
+local btnBringAll = createToggleButton(rightCol, "BringAll", "Bring All Blackholes")
+local btnDragBH = createToggleButton(rightCol, "DragBH", "Toggle Drag Blackholes")
+local btnFollowSelected = createToggleButton(rightCol, "FollowSelected", "Follow Selected")
+local btnFollowAll = createToggleButton(rightCol, "FollowAll", "Follow All")
+local btnExplodeSelected = createToggleButton(rightCol, "ExplodeSelected", "Explode Selected")
+local btnExplodeAll = createToggleButton(rightCol, "ExplodeAll", "Explode All")
+-- New Blackhole Linking button (on right column)
+local btnLinking = createToggleButton(rightCol, "Linking", "Blackhole Linking")
+btnLinking.MouseButton1Click:Connect(function()
+    if not linkingActive then
+        local linked = multiSelectionMode and selectedBlackholes or {}
+        if #linked < 2 then
+            btnLinking.Text = "Select at least 2!"
+            wait(1)
+            btnLinking.Text = "Blackhole Linking"
+            return
+        end
+        linkingActive = true
+        startLinking()
+        btnLinking.Text = "Stop Linking"
+        listContainer:ClearAllChildren()
+        local linkBtn = Instance.new("TextButton", listContainer)
+        linkBtn.Size = UDim2.new(0, 130, 0, 30)
+        linkBtn.BackgroundColor3 = Color3.new(0,1,0)
+        linkBtn.Text = "Blackhole Link"
+        linkBtn.Font = Enum.Font.GothamBold
+        linkBtn.TextScaled = true
+        listContainer.CanvasSize = UDim2.new(0, 130, 0, 30)
+    else
+        linkingActive = false
+        stopLinking()
+        btnLinking.Text = "Blackhole Linking"
+        updateSelectorUI()
+    end
+end)
+
+local chaseContainer = Instance.new("Frame", rightCol)
+chaseContainer.Size = UDim2.new(1, 0, 0, 60)
+chaseContainer.BackgroundTransparency = 1
+
+local chaseTextBox = Instance.new("TextBox", chaseContainer)
+chaseTextBox.Size = UDim2.new(0.6, 0, 1, 0)
+chaseTextBox.Position = UDim2.new(0, 0, 0, 0)
+chaseTextBox.BackgroundColor3 = Color3.fromRGB(40,40,40)
+chaseTextBox.TextColor3 = Color3.new(1,1,1)
+chaseTextBox.Font = Enum.Font.GothamBold
+chaseTextBox.TextScaled = true
+chaseTextBox.PlaceholderText = "Enter target name..."
+
+local btnChaseSelected = createToggleButton(chaseContainer, "ChaseSelected", "Chase Selected")
+btnChaseSelected.Size = UDim2.new(0.4, -5, 1, 0)
+btnChaseSelected.Position = UDim2.new(0.6, 5, 0, 0)
+
+local chaseContainer2 = Instance.new("Frame", rightCol)
+chaseContainer2.Size = UDim2.new(1, 0, 0, 40)
+chaseContainer2.BackgroundTransparency = 1
+
+local btnChaseAll = createToggleButton(chaseContainer2, "ChaseAll", "Chase All")
+btnChaseAll.Size = UDim2.new(0.48, -5, 1, 0)
+btnChaseAll.Position = UDim2.new(0, 0, 0, 0)
+
+local btnAutoChase = createToggleButton(chaseContainer2, "AutoChase", "Auto Chase Nearby")
+btnAutoChase.Size = UDim2.new(0.48, -5, 1, 0)
+btnAutoChase.Position = UDim2.new(0.52, 5, 0, 0)
+
+--------------------------------------------------------------------------------
+-- ADVANCED GUARDIAN MODE FUNCTIONS
+--------------------------------------------------------------------------------
+local guardDistance = 5            -- Ideal distance behind the player (base value)
+local cautionDistance = 20         -- Distance within which an enemy is a threat
+local dangerAngle = math.rad(60)   -- 60° cone in front of the player
+
+local function assignGuardOffset(bh)
+    if not bh.GuardOffset then
+        local angle = math.random() * math.pi * 2
+        local dist = math.random() * 3
+        bh.GuardOffset = Vector3.new(math.cos(angle) * dist, 0, math.sin(angle) * dist)
+    end
+end
+
+local function setupLocalPlayerDeathTracking()
+    if LocalPlayer.Character then
+        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.Died:Connect(function()
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player ~= LocalPlayer and player.Character then
+                        local enemyHRP = player.Character:FindFirstChild("HumanoidRootPart")
+                        if enemyHRP and (enemyHRP.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude < 30 then
+                            localKiller = player
+                            break
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end
+
+setupLocalPlayerDeathTracking()
+
+Players.LocalPlayer.CharacterAdded:Connect(function(character)
+    localKiller = nil
+    setupLocalPlayerDeathTracking()
+end)
+
+local function updateGuardianBehavior(bh)
+    if bh.GuardianMode == "off" then return end
+    if bh.Hidden then return end
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local playerPos = hrp.Position
+    local playerLook = hrp.CFrame.LookVector
+    local mode = "normal"
+    local enemyFound = nil
+
+    if not LocalPlayer.Character or (LocalPlayer.Character:FindFirstChildOfClass("Humanoid") and LocalPlayer.Character:FindFirstChildOfClass("Humanoid").Health <= 0) then
+        if localKiller and localKiller.Character then mode = "vengeance" end
+    else
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local enemyHRP = player.Character:FindFirstChild("HumanoidRootPart")
+                if enemyHRP then
+                    local toEnemy = enemyHRP.Position - playerPos
+                    local distance = toEnemy.Magnitude
+                    local angle = math.acos(math.clamp(toEnemy.Unit:Dot(playerLook), -1, 1))
+                    if distance < cautionDistance and angle < dangerAngle then
+                        mode = "caution"
+                        enemyFound = player
+                        break
+                    end
+                end
+            end
+        end
+
+        local holdingTool = false
+        for _, child in ipairs(LocalPlayer.Character:GetChildren()) do
+            if child:IsA("Tool") then
+                holdingTool = true
+                break
+            end
+        end
+        if holdingTool and enemyFound then mode = "hostile" end
+    end
+
+    if mode == "normal" or mode == "caution" or mode == "hostile" then
+        assignGuardOffset(bh)
+    end
+
+    local desiredPos = playerPos
+    if mode == "normal" then
+        desiredPos = playerPos - playerLook * guardDistance + Vector3.new(0,3,0) + bh.GuardOffset
+    elseif mode == "caution" then
+        local enemyPos = enemyFound and enemyFound.Character:FindFirstChild("HumanoidRootPart").Position or (playerPos + playerLook * cautionDistance)
+        local midPoint = playerPos:Lerp(enemyPos, 0.5)
+        desiredPos = midPoint + Vector3.new(0,3,0) + bh.GuardOffset
+    elseif mode == "hostile" then
+        if enemyFound and enemyFound.Character then
+            local enemyHRP = enemyFound.Character:FindFirstChild("HumanoidRootPart")
+            if enemyHRP then
+                desiredPos = enemyHRP.Position + bh.GuardOffset
+            else
+                desiredPos = playerPos - playerLook * guardDistance + Vector3.new(0,3,0) + bh.GuardOffset
+            end
+        else
+            desiredPos = playerPos - playerLook * guardDistance + Vector3.new(0,3,0) + bh.GuardOffset
+        end
+    elseif mode == "vengeance" then
+        if localKiller and localKiller.Character then
+            local killerHRP = localKiller.Character:FindFirstChild("HumanoidRootPart")
+            if killerHRP then
+                desiredPos = killerHRP.Position + bh.GuardOffset
+            else
+                desiredPos = playerPos - playerLook * guardDistance + Vector3.new(0,3,0) + bh.GuardOffset
+            end
+        else
+            desiredPos = playerPos - playerLook * guardDistance + Vector3.new(0,3,0) + bh.GuardOffset
+        end
+    end
+
+    bh.Part.CFrame = bh.Part.CFrame:Lerp(CFrame.new(desiredPos), 0.1)
+end
+
+RunService.RenderStepped:Connect(function()
+    if not multiSelectionMode and selectedBlackhole and selectedBlackhole.GuardianMode ~= "off" then
+        updateGuardianBehavior(selectedBlackhole)
+    elseif multiSelectionMode then
+        for _, bh in ipairs(selectedBlackholes) do
+            if bh.GuardianMode ~= "off" then updateGuardianBehavior(bh) end
+        end
+    end
+end)
+
+--------------------------------------------------------------------------------
+-- BOB MODE UPDATE
+--------------------------------------------------------------------------------
+RunService.RenderStepped:Connect(function()
+    if primaryBlackhole then
+        local currentTime = tick()
+        for _, bh in ipairs(blackholeList) do
+            if bh.BOBMode and bh ~= primaryBlackhole and not bh.Hidden then
+                local phase = bh.BobPhase or 0
+                local offset = Vector3.new(math.cos(currentTime * bobSpeed + phase) * orbitRadius, 0, math.sin(currentTime * bobSpeed + phase) * orbitRadius)
+                bh.Part.CFrame = bh.Part.CFrame:Lerp(CFrame.new(primaryBlackhole.Part.Position + offset), 0.1)
+            end
+        end
+    end
+end)
+
+--------------------------------------------------------------------------------
+-- UI BUTTON FUNCTIONALITY: TOGGLE GUARDIAN & HIDE
+--------------------------------------------------------------------------------
+local function toggleGuardian()
+    if not multiSelectionMode then
+        if not selectedBlackhole then return end
+        if selectedBlackhole.GuardianMode == "off" then
+            selectedBlackhole.GuardianMode = "normal"
+            btnGuardian.Text = "Disable Guardian (Selected)"
+        else
+            selectedBlackhole.GuardianMode = "off"
+            btnGuardian.Text = "Enable Guardian (Selected)"
+        end
+    else
+        for _, bh in ipairs(selectedBlackholes) do
+            if bh.GuardianMode == "off" then bh.GuardianMode = "normal" else bh.GuardianMode = "off" end
+        end
+        local allOn = true
+        for _, bh in ipairs(selectedBlackholes) do
+            if bh.GuardianMode == "off" then allOn = false break end
+        end
+        btnGuardian.Text = allOn and "Disable Guardian (Selected)" or "Enable Guardian (Selected)"
+    end
+    updateSelectorUI()
+end
+
+local function toggleGuardianAll()
+    guardianAllActive = not guardianAllActive
+    for _, bh in ipairs(blackholeList) do bh.GuardianMode = guardianAllActive and "normal" or "off" end
+    btnGuardianAll.Text = guardianAllActive and "Disable Guardian (All)" or "Enable Guardian (All)"
+end
+
+--------------------------------------------------------------------------------
+-- CHASE FUNCTIONALITY
+--------------------------------------------------------------------------------
+local function findTarget(targetText)
+    local search = targetText:lower()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local uname = player.Name:lower()
+            local dname = (player.DisplayName or ""):lower()
+            if uname:find(search) or dname:find(search) then return player end
+        end
+    end
+    return nil
+end
+
+local function startChaseSelected(targetPlayer)
+    if not (selectedBlackhole and targetPlayer and targetPlayer.Character) then return end
+    local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not targetHRP then return end
+    chaseSelectedConn = RunService.RenderStepped:Connect(function()
+        selectedBlackhole.Part.CFrame = selectedBlackhole.Part.CFrame:Lerp(targetHRP.CFrame, 0.1)
+    end)
+    btnChaseSelected.Text = "Stop Chase (Selected)"
+end
+
+local function stopChaseSelected()
+    if chaseSelectedConn then chaseSelectedConn:Disconnect() chaseSelectedConn = nil end
+    btnChaseSelected.Text = "Chase Selected"
+end
+
+local function startChaseAll(targetPlayer)
+    if not (targetPlayer and targetPlayer.Character) then return end
+    local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not targetHRP then return end
+    chaseAllConn = RunService.RenderStepped:Connect(function()
+        for _, bh in ipairs(blackholeList) do
+            bh.Part.CFrame = bh.Part.CFrame:Lerp(targetHRP.CFrame, 0.1)
+        end
+    end)
+    btnChaseAll.Text = "Stop Chase (All)"
+end
+
+local function stopChaseAll()
+    if chaseAllConn then chaseAllConn:Disconnect() chaseAllConn = nil end
+    btnChaseAll.Text = "Chase All"
+end
+
+local function startAutoChase()
+    autoChaseConn = RunService.RenderStepped:Connect(function()
+        for _, bh in ipairs(blackholeList) do
+            local closestPlayer, closestDistance = nil, math.huge
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character then
+                    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        local dist = (bh.Part.Position - hrp.Position).Magnitude
+                        if dist < closestDistance and dist < 50 then
+                            closestDistance = dist
+                            closestPlayer = player
+                        end
+                    end
+                end
+            end
+            if closestPlayer and closestPlayer.Character then
+                local targetHRP = closestPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if targetHRP then
+                    bh.Part.CFrame = bh.Part.CFrame:Lerp(targetHRP.CFrame, 0.1)
+                end
+            end
+        end
+    end)
+    btnAutoChase.Text = "Stop Auto Chase"
+end
+
+local function stopAutoChase()
+    if autoChaseConn then autoChaseConn:Disconnect() autoChaseConn = nil end
+    btnAutoChase.Text = "Auto Chase Nearby"
+end
+
+btnChaseSelected.MouseButton1Click:Connect(function()
+    if chaseSelectedConn then
+        stopChaseSelected()
+    else
+        local targetPlayer = findTarget(chaseTextBox.Text or "")
+        if targetPlayer then
+            startChaseSelected(targetPlayer)
+        else
+            btnChaseSelected.Text = "No target found"
+            wait(1)
+            btnChaseSelected.Text = "Chase Selected"
+        end
+    end
+end)
+
+btnChaseAll.MouseButton1Click:Connect(function()
+    if chaseAllConn then
+        stopChaseAll()
+    else
+        local targetPlayer = findTarget(chaseTextBox.Text or "")
+        if targetPlayer then
+            startChaseAll(targetPlayer)
+        else
+            btnChaseAll.Text = "No target found"
+            wait(1)
+            btnChaseAll.Text = "Chase All"
+        end
+    end
+end)
+
+btnAutoChase.MouseButton1Click:Connect(function()
+    if autoChaseConn then
+        stopAutoChase()
+    else
+        startAutoChase()
+    end
+end)
+
+--------------------------------------------------------------------------------
+-- CONNECT UI BUTTONS (Left/Right Columns)
+--------------------------------------------------------------------------------
+btnCreateBH.MouseButton1Click:Connect(function() createBlackHole() updateSelectorUI() end)
+btnRemoveBH.MouseButton1Click:Connect(function()
+    if not multiSelectionMode then
+        if selectedBlackhole then
+            selectedBlackhole.Part:Destroy()
+            for i, bh in ipairs(blackholeList) do
+                if bh == selectedBlackhole then table.remove(blackholeList, i) break end
+            end
+            selectedBlackhole = blackholeList[1] or nil
+            updateSelectorUI()
+        end
+    else
+        for i = #selectedBlackholes, 1, -1 do
+            local bh = selectedBlackholes[i]
+            bh.Part:Destroy()
+            for j, candidate in ipairs(blackholeList) do
+                if candidate == bh then table.remove(blackholeList, j) break end
+            end
+            table.remove(selectedBlackholes, i)
+        end
+        updateSelectorUI()
+    end
+end)
+btnToggleSuction.MouseButton1Click:Connect(function()
+    blackHoleActive = not blackHoleActive
+    btnToggleSuction.Text = blackHoleActive and "Deactivate Suction" or "Activate Suction"
+end)
+btnOrbitBH.MouseButton1Click:Connect(function()
+    orbitActive = not orbitActive
+    if orbitActive then
+        btnOrbitBH.Text = "Stop Orbit"
+        spawn(function()
+            local baseAngle = 0
+            while orbitActive and RunService.RenderStepped:Wait() do
+                baseAngle = baseAngle + orbitSpeed * math.rad(1)
+                local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    for i, bh in ipairs(blackholeList) do
+                        local angle = baseAngle + (i - 1) * (math.pi / 8)
+                        local radius = orbitRadius + (i - 1) * 2
+                        local newPos = hrp.Position + Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
+                        bh.Part.CFrame = CFrame.new(newPos, hrp.Position)
+                    end
+                end
+            end
+        end)
+    else
+        btnOrbitBH.Text = "Orbit All Blackholes"
+    end
+end)
+btnRepulse.MouseButton1Click:Connect(function()
+    repulsiveMode = not repulsiveMode
+    btnRepulse.Text = repulsiveMode and "Deactivate Repulsive Mode" or "Activate Repulsive Mode"
+end)
+btnBringAll.MouseButton1Click:Connect(function()
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        for _, bh in ipairs(blackholeList) do bh.Part.CFrame = hrp.CFrame end
+    end
+end)
+btnDragBH.MouseButton1Click:Connect(function()
+    dragModeActive = not dragModeActive
+    for _, bh in ipairs(blackholeList) do
+        bh.Part.InputBegan:Connect(function(input)
+            if dragModeActive and input.UserInputType == Enum.UserInputType.MouseButton1 then
+                local hl = Instance.new("Highlight", bh.Part)
+                hl.FillColor = Color3.fromRGB(255,255,0)
+                hl.OutlineColor = Color3.fromRGB(255,255,0)
+                local moveConn
+                moveConn = RunService.RenderStepped:Connect(function()
+                    local mousePos = UserInputService:GetMouseLocation()
+                    local cam = workspace.CurrentCamera
+                    local ray = cam:ScreenPointToRay(mousePos.X, mousePos.Y)
+                    local newPos = ray.Origin + ray.Direction * 50
+                    bh.Part.CFrame = CFrame.new(newPos)
+                end)
+                input.Changed:Connect(function(prop)
+                    if prop == "UserInputState" and input.UserInputState == Enum.UserInputState.End then
+                        moveConn:Disconnect()
+                        hl:Destroy()
+                    end
+                end)
+            end
+        end)
+    end
+end)
+btnFollowSelected.MouseButton1Click:Connect(function()
+    followSelectedActive = not followSelectedActive
+    if followSelectedActive and selectedBlackhole then
+        followSelectedConn = RunService.RenderStepped:Connect(function()
+            local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hrp and selectedBlackhole then
+                selectedBlackhole.Part.CFrame = selectedBlackhole.Part.CFrame:Lerp(hrp.CFrame, 0.1)
+            end
+        end)
+    else
+        if followSelectedConn then followSelectedConn:Disconnect() followSelectedConn = nil end
+    end
+end)
+btnFollowAll.MouseButton1Click:Connect(function()
+    followAllActive = not followAllActive
+    if followAllActive then
+        followAllConn = RunService.RenderStepped:Connect(function()
+            local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                for _, bh in ipairs(blackholeList) do bh.Part.CFrame = bh.Part.CFrame:Lerp(hrp.CFrame, 0.1) end
+            end
+        end)
+    else
+        if followAllConn then followAllConn:Disconnect() followAllConn = nil end
+    end
+end)
+btnExplodeSelected.MouseButton1Click:Connect(explodeSelected)
+btnExplodeAll.MouseButton1Click:Connect(explodeAll)
+btnGuardian.MouseButton1Click:Connect(toggleGuardian)
+btnGuardianAll.MouseButton1Click:Connect(toggleGuardianAll)
+-- Linking button (right column) already connected above
+
+--------------------------------------------------------------------------------
+-- ADDITIONAL UI: CLOSE & OPEN BUTTONS (X moved to top-right)
+--------------------------------------------------------------------------------
+local closeButton = Instance.new("TextButton", mainFrame)
+closeButton.Name = "CloseButton"
+closeButton.AnchorPoint = Vector2.new(1,0)
+closeButton.Position = UDim2.new(1, -5, 0, 5)
+closeButton.Size = UDim2.new(0, 30, 0, 30)
+closeButton.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+closeButton.Text = "X"
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextScaled = true
+closeButton.TextColor3 = Color3.new(1, 1, 1)
+local closeCorner = Instance.new("UICorner", closeButton)
+closeCorner.CornerRadius = UDim.new(0, 12)
+
+local openButton = Instance.new("TextButton", ScreenGui)
+openButton.Name = "OpenUIButton"
+openButton.Size = UDim2.new(0, 100, 0, 40)
+openButton.Position = UDim2.new(0.5, -50, 0, 10)
+openButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+openButton.Text = "Show UI"
+openButton.Font = Enum.Font.GothamBold
+openButton.TextScaled = true
+openButton.TextColor3 = Color3.new(1, 1, 1)
+openButton.Visible = false
+local openCorner = Instance.new("UICorner", openButton)
+openCorner.CornerRadius = UDim.new(0, 12)
+
+closeButton.MouseButton1Click:Connect(function()
+    mainFrame.Visible = false
+    openButton.Visible = true
+end)
+openButton.MouseButton1Click:Connect(function()
+    mainFrame.Visible = true
+    openButton.Visible = false
+end)
+
+--------------------------------------------------------------------------------
+-- INITIAL SETUP
+--------------------------------------------------------------------------------
+if #blackholeList == 0 then
+    local initialBH = createBlackHole()
+    if not multiSelectionMode then
+        selectedBlackhole = initialBH
+    else
+        table.insert(selectedBlackholes, initialBH)
+    end
+    updateSelectorUI()
+end
