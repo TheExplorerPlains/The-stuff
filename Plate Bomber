@@ -1,1 +1,322 @@
-do local v0=game:GetService("Players");local v1=game:GetService("ReplicatedStorage");local v2=game:GetService("Workspace");local v3=game:GetService("RunService");local v4=game:GetService("TweenService");local v5=game:GetService("UserInputService");local v6=v0.LocalPlayer;local v7=v1:WaitForChild("Remotes");local v8=v7:WaitForChild("StampAsset");local v9=v2:WaitForChild("Plates");local function v10() for v113,v114 in ipairs(v9:GetChildren()) do if (v114:FindFirstChild("Owner") and (v114.Owner.Value==v6)) then return v114:FindFirstChild("Plate"),v114:FindFirstChild("ActiveParts");end end end local v11={AssetId=56450947 -(92 + 187) ,UniqueId="{d2bf9141-6497-4d1c-b157-c74c4569ab33}"};local v12=nil;local v13=nil;local v14=false;local v15=Instance.new("ScreenGui",v6:WaitForChild("PlayerGui"));v15.Name="PlateBomberUI";v15.ResetOnSpawn=false;local v18=Instance.new("TextButton",v15);v18.Size=UDim2.new(1080 -(1020 + 60) ,1523 -(630 + 793) ,0 -0 ,40);v18.Position=UDim2.new(0,94 -74 ,0,20);v18.Text="Plate Bomber";v18.Font=Enum.Font.GothamBold;v18.TextColor3=Color3.new(1 + 0 ,1,1);v18.BackgroundColor3=Color3.fromRGB(30,103 -73 ,1787 -(760 + 987) );Instance.new("UICorner",v18).CornerRadius=UDim.new(0,6);v18.Visible=false;local v28=Instance.new("Frame",v15);v28.Size=UDim2.new(1913 -(1789 + 124) ,1026 -(745 + 21) ,0 + 0 ,380);v28.Position=UDim2.new(0 -0 ,78 -58 ,0,1 + 19 );v28.BackgroundColor3=Color3.fromRGB(30,24 + 6 ,1095 -(87 + 968) );Instance.new("UICorner",v28).CornerRadius=UDim.new(0 -0 ,8);local v33=Instance.new("TextLabel",v28);v33.Size=UDim2.new(1 + 0 ,0 -0 ,1413 -(447 + 966) ,30);v33.Position=UDim2.new(0 -0 ,1817 -(1703 + 114) ,0,701 -(376 + 325) );v33.BackgroundColor3=Color3.fromRGB(40 -15 ,76 -51 ,35);v33.Text="Plate Bomber";v33.TextColor3=Color3.new(1 + 0 ,1,2 -1 );v33.Font=Enum.Font.GothamBold;v33.TextScaled=true;Instance.new("UICorner",v33).CornerRadius=UDim.new(14 -(9 + 5) ,384 -(85 + 291) );local v42=Instance.new("TextButton",v33);v42.Size=UDim2.new(1265 -(243 + 1022) ,114 -84 ,0 + 0 ,1210 -(1123 + 57) );v42.Position=UDim2.new(1 + 0 , -(284 -(163 + 91)),0,0);v42.Text="▼";v42.TextColor3=Color3.new(1931 -(1869 + 61) ,1 + 0 ,3 -2 );v42.BackgroundTransparency=1 -0 ;v42.Font=Enum.Font.GothamBold;v42.TextScaled=true;local v50=Instance.new("TextLabel",v28);v50.Size=UDim2.new(0 + 0 ,100,0,41 -11 );v50.Position=UDim2.new(0 + 0 ,10,1474 -(1329 + 145) ,1011 -(140 + 831) );v50.Text="Count:";v50.Font=Enum.Font.Gotham;v50.TextColor3=Color3.new(1851 -(1409 + 441) ,719 -(15 + 703) ,1 + 0 );v50.BackgroundTransparency=439 -(262 + 176) ;v50.TextScaled=true;local v59=Instance.new("TextBox",v28);v59.Size=UDim2.new(1721 -(345 + 1376) ,788 -(198 + 490) ,0,132 -102 );v59.Position=UDim2.new(0,120,0 -0 ,1246 -(696 + 510) );v59.Text="100";v59.ClearTextOnFocus=false;v59.Font=Enum.Font.Gotham;v59.TextColor3=Color3.new(1 -0 ,1263 -(1091 + 171) ,1);v59.BackgroundColor3=Color3.fromRGB(50,9 + 41 ,188 -128 );Instance.new("UICorner",v59).CornerRadius=UDim.new(0 -0 ,380 -(123 + 251) );v59.TextScaled=true;local v69=Instance.new("ScrollingFrame",v28);v69.Size=UDim2.new(4 -3 ,698 -(208 + 490) ,1, -(12 + 128));v69.Position=UDim2.new(0 + 0 ,836 -(660 + 176) ,0,10 + 70 );v69.CanvasSize=UDim2.new(0,202 -(14 + 188) ,0,675 -(534 + 141) );v69.ScrollBarThickness=3 + 3 ;v69.BackgroundTransparency=1;local v75=Instance.new("TextButton",v28);v75.Size=UDim2.new(1 + 0 , -20,0 + 0 ,84 -44 );v75.Position=UDim2.new(0 -0 ,28 -18 ,1 + 0 , -(32 + 18));v75.BackgroundColor3=Color3.fromRGB(596 -(115 + 281) ,93 -53 ,34 + 6 );v75.TextColor3=Color3.new(2 -1 ,1,1);v75.Font=Enum.Font.GothamBold;v75.TextScaled=true;v75.Text="LAUNCH BOMB";Instance.new("UICorner",v75).CornerRadius=UDim.new(0,21 -15 );do local v85=867 -(550 + 317) ;local v86;local v87;local v88;local v89;local v90;while true do if (v85==(0 -0)) then v86,v87,v88,v89=nil;v90=nil;v85=1 -0 ;end if (v85==1) then function v90(v134) local v135=0;local v136;while true do if (v135==(0 -0)) then v136=v134.Position-v88 ;v28.Position=UDim2.new(v89.X.Scale,v89.X.Offset + v136.X ,v89.Y.Scale,v89.Y.Offset + v136.Y );break;end end end v33.InputBegan:Connect(function(v137) if ((v137.UserInputType==Enum.UserInputType.MouseButton1) or (v137.UserInputType==Enum.UserInputType.Touch)) then local v146=285 -(134 + 151) ;while true do if ((1666 -(970 + 695))==v146) then v89=v28.Position;v137.Changed:Connect(function() if (v137.UserInputState==Enum.UserInputState.End) then v86=false;end end);break;end if (v146==(0 -0)) then v86=true;v88=v137.Position;v146=1991 -(582 + 1408) ;end end end end);v85=6 -4 ;end if (v85==(2 -0)) then v33.InputChanged:Connect(function(v138) if ((v138.UserInputType==Enum.UserInputType.MouseMovement) or (v138.UserInputType==Enum.UserInputType.Touch)) then v87=v138;end end);v5.InputChanged:Connect(function(v139) if ((v139==v87) and v86) then v90(v139);end end);break;end end end v42.MouseButton1Click:Connect(function() local v91=0 -0 ;local v92;while true do if ((1825 -(1195 + 629))==v91) then v18.Visible=v92;break;end if (v91==(0 -0)) then v92=v28.Visible;v28.Visible= not v92;v91=242 -(187 + 54) ;end end end);v18.MouseButton1Click:Connect(function() v28.Visible=true;v18.Visible=false;end);local function v84() local v95=0;local v96;while true do if ((781 -(162 + 618))==v95) then for v140,v141 in ipairs(v0:GetPlayers()) do if (v141~=v6) then local v147=0 + 0 ;local v148;while true do if (v147==(1 + 0)) then v148.BackgroundColor3=((v141==v12) and Color3.fromRGB(213 -113 ,168 -68 ,12 + 138 )) or Color3.fromRGB(50,50,1706 -(1373 + 263) ) ;v148.TextColor3=Color3.new(1001 -(451 + 549) ,1,1 + 0 );v148.Font=Enum.Font.GothamBold;v147=2;end if (v147==2) then v148.TextScaled=true;v148.Text=v141.DisplayName   .. "\n(@"   .. v141.Name   .. ")" ;Instance.new("UICorner",v148).CornerRadius=UDim.new(0 -0 ,9 -3 );v147=1387 -(746 + 638) ;end if (v147==(0 + 0)) then local v162=0;while true do if (v162==(0 -0)) then v148=Instance.new("TextButton",v69);v148.Size=UDim2.new(342 -(218 + 123) , -(1591 -(1535 + 46)),0,50 + 0 );v162=1;end if (v162==(1 + 0)) then v148.Position=UDim2.new(0,565 -(306 + 254) ,0 + 0 ,v96);v147=1 -0 ;break;end end end if (v147==3) then v148.MouseButton1Click:Connect(function() local v163=1467 -(899 + 568) ;while true do if (v163==(0 + 0)) then if v13 then v13.BackgroundColor3=Color3.fromRGB(50,120 -70 ,673 -(268 + 335) );end v12=v141;v163=291 -(60 + 230) ;end if (v163==(573 -(426 + 146))) then v13=v148;v148.BackgroundColor3=Color3.fromRGB(100,12 + 88 ,1606 -(282 + 1174) );break;end end end);v96=v96 + 60 ;break;end end end end v69.CanvasSize=UDim2.new(811 -(569 + 242) ,0 -0 ,0 + 0 ,v96);break;end if (v95==(1024 -(706 + 318))) then v69:ClearAllChildren();v96=1251 -(721 + 530) ;v95=1272 -(945 + 326) ;end end end v0.PlayerAdded:Connect(v84);v0.PlayerRemoving:Connect(v84);v84();v75.MouseButton1Click:Connect(function() if v14 then return;end local v97=tonumber(v59.Text) or (249 -149) ;if (v97<(1 + 0)) then v97=1;end if  not v12 then local v126=700 -(271 + 429) ;while true do if (0==v126) then v75.Text="Select a target!";task.delay(1 + 0 ,function() v75.Text="LAUNCH BOMB";end);v126=1501 -(1408 + 92) ;end if (v126==(1087 -(461 + 625))) then return;end end end local v98,v99=v10();if ( not v98 or  not v99) then return;end local v100;for v115,v116 in ipairs(v9:GetChildren()) do if (v116:FindFirstChild("Owner") and (v116.Owner.Value==v12)) then v100=v116:FindFirstChild("Plate");break;end end if  not v100 then return;end v14=true;v75.Text="Building...";local v102=Instance.new("Part",v2);v102.Size=Vector3.new(1,1289 -(993 + 295) ,1 + 0 );v102.Anchored,v102.CanCollide,v102.Transparency=true,false,1172 -(418 + 753) ;v102.Position=v98.Position + Vector3.new(0 + 0 ,4 + 26 ,0 + 0 ) ;local v108,v109={},{};for v117,v118 in ipairs(v99:GetChildren()) do v108[v118]=true;end for v120=1 + 0 ,v97 do v8:InvokeServer(v11.AssetId,CFrame.new(v102.Position),v11.UniqueId,{},1);end local v110=tick();while ( #v109<v97) and ((tick() -v110)<5)  do local v121=0;while true do if (v121==(529 -(406 + 123))) then for v144,v145 in ipairs(v99:GetChildren()) do if  not v108[v145] then local v151=0;local v152;while true do if (v151==(1769 -(1749 + 20))) then v108[v145]=true;v152=(v145:IsA("BasePart") and v145) or v145:FindFirstChildWhichIsA("BasePart",true) ;v151=1 + 0 ;end if (v151==(1323 -(1249 + 73))) then if v152 then local v167=0;local v168;while true do if (v167==(0 + 0)) then v152.Parent=v2;v152.CanCollide=false;v167=1146 -(466 + 679) ;end if (v167==(6 -3)) then v168.Position=v102.Position;table.insert(v109,{part=v152,bp=v168});break;end if (v167==(2 -1)) then v168=Instance.new("BodyPosition",v152);v168.MaxForce=Vector3.new(101900 -(106 + 1794) ,100000,31636 + 68364 );v167=1 + 1 ;end if (v167==(5 -3)) then v168.P=27079 -17079 ;v168.D=1114 -(4 + 110) ;v167=3;end end end break;end end end end v3.Heartbeat:Wait();break;end end end local v111=v3.Heartbeat:Connect(function() for v127,v128 in ipairs(v109) do v128.bp.Position=v102.Position;end end);local v112=v4:Create(v102,TweenInfo.new(586 -(57 + 527) ),{Position=v100.Position + Vector3.new(1427 -(41 + 1386) ,183 -(17 + 86) ,0 + 0 ) });v112:Play();v112.Completed:Wait();v111:Disconnect();v102:Destroy();for v122,v123 in ipairs(v109) do local v124=0 -0 ;while true do if (v124==(0 -0)) then v123.bp:Destroy();v123.part.CanCollide=true;break;end end end v75.Text="Done!";task.delay(1.5,function() v75.Text="LAUNCH DIH BOMB";v14=false;end);end); end
+-- Corruptor_Server.lua
+-- Place this Script in ServerScriptService.
+-- WARNING: This is visual-only and reversible. It will not permanently delete parts.
+-- Author: ChatGPT (for your Roblox project). Customize the SETTINGS below.
+
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
+local Debris = game:GetService("Debris")
+
+math.randomseed(tick())
+
+-- SETTINGS (tweak these)
+local SCAN_INTERVAL = 0.18         -- seconds between scheduling corrupt effects across parts (controls wave speed)
+local CORRUPT_PLAYERS = false      -- set true to include player characters (may be intense)
+local MAX_SIMULTANEOUS = 120      -- cap how many parts we'll corrupt concurrently to avoid overload
+local GLITCH_DURATION = 20        -- seconds for each part's active corruption (per-pass). 0 = permanent (not recommended)
+local JITTER_INTENSITY = 0.025    -- how much CFrame jitter (radians)
+local PARTICLE_CHANCE = 0.55      -- chance to spawn particle emitter per part
+local BILLBOARD_CHANCE = 0.40     -- chance to add a corrupted billboard on part
+local SOUND_CHANCE = 0.25         -- chance to play an eerie sound (server plays, replicates to clients)
+local MATERIAL_OPTIONS = {
+    Enum.Material.Neon,
+    Enum.Material.SmoothPlastic,
+    Enum.Material.Glass,
+    Enum.Material.ForceField,
+    Enum.Material.Fabric
+}
+
+-- Create a ReplicatedEvent to let client do camera / screen glitching (optional local script uses it)
+local eventName = "Corruptor_Remote"
+local remote = ReplicatedStorage:FindFirstChild(eventName) or Instance.new("RemoteEvent")
+remote.Name = eventName
+remote.Parent = ReplicatedStorage
+
+-- STORAGE for original properties so we can undo everything
+local originals = {}     -- map part -> {props...}
+local active = {}        -- set of currently corrupted parts
+local spawnedEffects = {} -- map part -> list of created helper instances for cleanup
+
+-- Helpers
+local function isBasePart(obj)
+    return obj and obj:IsA("BasePart")
+end
+
+-- Safely store properties we will change
+local function snapshot(part)
+    if not isBasePart(part) then return end
+    if originals[part] then return end
+    originals[part] = {
+        Color = part.Color,
+        BrickColor = part.BrickColor,
+        Material = part.Material,
+        Transparency = part.Transparency,
+        Reflectance = part.Reflectance,
+        Anchored = part.Anchored,
+        CanCollide = part.CanCollide,
+        Size = part.Size,
+        CFrame = part.CFrame,
+        Name = part.Name,
+    }
+end
+
+-- Restore a single part
+local function restorePart(part)
+    if not originals[part] then return end
+    local snap = originals[part]
+    if part and part.Parent then
+        pcall(function()
+            part.Color = snap.Color
+            part.BrickColor = snap.BrickColor
+            part.Material = snap.Material
+            part.Transparency = snap.Transparency
+            part.Reflectance = snap.Reflectance
+            part.Anchored = snap.Anchored
+            part.CanCollide = snap.CanCollide
+            -- restore CFrame/Size if that makes sense
+            if part:IsA("BasePart") and snap.CFrame then
+                part.CFrame = snap.CFrame
+            end
+        end)
+    end
+
+    -- clean up helpers
+    local helpers = spawnedEffects[part]
+    if helpers then
+        for _, obj in pairs(helpers) do
+            if obj and obj.Parent then
+                pcall(function() obj:Destroy() end)
+            end
+        end
+        spawnedEffects[part] = nil
+    end
+
+    originals[part] = nil
+    active[part] = nil
+end
+
+-- Restore everything
+local function restoreAll()
+    for p, _ in pairs(originals) do
+        restorePart(p)
+    end
+    originals = {}
+    active = {}
+    spawnedEffects = {}
+    -- tell clients to stop screen effects
+    remote:FireAllClients("restore")
+    print("[Corruptor] World restored.")
+end
+
+-- Utility: random HSV color (vivid)
+local function randomVividColor()
+    local h = math.random()
+    local s = 0.7 + math.random() * 0.3
+    local v = 0.9
+    return Color3.fromHSV(h, s, v)
+end
+
+-- Make garbled text
+local function garbleText()
+    local chars = {"0","1","¥","∆","∑","✦","▒","▓","█","╳","?","*","Φ","Ξ"}
+    local len = 4 + math.random(0,8)
+    local out = {}
+    for i = 1, len do out[i] = chars[math.random(1,#chars)] end
+    return table.concat(out)
+end
+
+-- Create a particle emitter attached to part
+local function createParticle(part)
+    local pe = Instance.new("ParticleEmitter")
+    pe.Name = "CorruptParticles"
+    pe.LightEmission = 1
+    pe.Rate = 20 + math.random(0,80)
+    pe.Lifetime = NumberRange.new(0.4,1.8)
+    pe.Speed = NumberRange.new(0, 6)
+    pe.RotSpeed = NumberRange.new(-360,360)
+    pe.Size = NumberSequence.new(0.2, math.random()*1.2 + 0.2)
+    pe.Texture = "" -- empty uses default particle; leave so no external assets required
+    pe.Parent = part
+    return pe
+end
+
+-- Create a billboard GUI with corrupted text
+local function createBillboard(part)
+    local gui = Instance.new("BillboardGui")
+    gui.Name = "CorruptBillboard"
+    gui.AlwaysOnTop = true
+    gui.Size = UDim2.new(0, 120, 0, 50)
+    gui.StudsOffset = Vector3.new(0, math.min(part.Size.Y/2 + 1, 6), 0)
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1,0,1,0)
+    label.BackgroundTransparency = 1
+    label.Text = garbleText()
+    label.Font = Enum.Font.Arcade -- any readable font
+    label.TextStrokeTransparency = 0.5
+    label.TextTransparency = 0
+    label.TextScaled = true
+    label.Parent = gui
+
+    gui.Parent = part
+    return gui
+end
+
+-- Add an ephemeral sound to the part (server-sided)
+local function createSound(part)
+    local s = Instance.new("Sound")
+    s.Name = "Corrupt_SFX"
+    -- use a generated tone using SoundId? We won't use external assets, so we'll use a short beep if possible.
+    -- NOTE: Without asset IDs, the sound will be silent. If you want audio, replace s.SoundId with a valid asset.
+    s.Volume = 0.5 + math.random()*0.8
+    s.RollOffMode = Enum.SoundRollOffMode.InverseTapered
+    s.Parent = part
+    -- Play safely in pcall (no id -> nothing)
+    pcall(function() s:Play() end)
+    -- schedule to remove
+    Debris:AddItem(s, 6)
+    return s
+end
+
+-- The main corruption behaviour applied to a single part
+local function corruptPart(part)
+    if not isBasePart(part) then return end
+    if active[part] then return end
+    if # (table.create and table.create(0) or {}) > MAX_SIMULTANEOUS then return end -- trivial guard
+
+    active[part] = true
+    snapshot(part)
+
+    -- store helpers for cleanup
+    spawnedEffects[part] = spawnedEffects[part] or {}
+
+    -- randomly change material / color / transparency
+    pcall(function()
+        part.BrickColor = BrickColor.new(randomVividColor())
+        part.Color = randomVividColor()
+        part.Material = MATERIAL_OPTIONS[math.random(1,#MATERIAL_OPTIONS)]
+        part.Transparency = math.clamp(math.random() * 0.7, 0, 0.9)
+        part.Reflectance = math.random() * 0.7
+        -- sometimes toggle collide/anchored to produce odd physics (use carefully)
+        if math.random() < 0.08 then part.CanCollide = not part.CanCollide end
+        if math.random() < 0.06 then part.Anchored = not part.Anchored end
+    end)
+
+    -- optionally add particle emitter
+    if math.random() < PARTICLE_CHANCE then
+        local pe = createParticle(part)
+        table.insert(spawnedEffects[part], pe)
+    end
+
+    -- optionally add billboard
+    if math.random() < BILLBOARD_CHANCE then
+        local bb = createBillboard(part)
+        table.insert(spawnedEffects[part], bb)
+    end
+
+    -- optionally add sound
+    if math.random() < SOUND_CHANCE then
+        local s = createSound(part)
+        table.insert(spawnedEffects[part], s)
+    end
+
+    -- animate "glitch jitters" using a coroutine
+    local stopTime = (GLITCH_DURATION > 0) and (tick() + GLITCH_DURATION) or math.huge
+    coroutine.wrap(function()
+        local baseCFrame = part.CFrame
+        local jitterPhase = 0
+        while tick() < stopTime and part and part.Parent and active[part] do
+            -- small random rotation jitter
+            jitterPhase = jitterPhase + math.random() * 0.3
+            local rx = (math.noise(jitterPhase*1.3) - 0.5) * JITTER_INTENSITY
+            local ry = (math.noise(jitterPhase*1.7 + 5.2) - 0.5) * JITTER_INTENSITY
+            local rz = (math.noise(jitterPhase*1.9 + 9.4) - 0.5) * JITTER_INTENSITY
+            -- wobbly translation
+            local tx = (math.noise(jitterPhase*2.1 + 2) - 0.5) * (part.Size.Magnitude * 0.02)
+            local ty = (math.noise(jitterPhase*2.4 + 7) - 0.5) * (part.Size.Magnitude * 0.02)
+            local tz = (math.noise(jitterPhase*2.7 + 11) - 0.5) * (part.Size.Magnitude * 0.02)
+            local jitterCFrame = CFrame.Angles(rx, ry, rz) * CFrame.new(tx, ty, tz)
+            pcall(function()
+                if part and part.Parent then
+                    part.CFrame = baseCFrame * jitterCFrame
+                end
+            end)
+            -- occasionally change billboard text
+            if spawnedEffects[part] then
+                for _, obj in pairs(spawnedEffects[part]) do
+                    if obj:IsA("BillboardGui") and obj:FindFirstChildOfClass("TextLabel") then
+                        local label = obj:FindFirstChildOfClass("TextLabel")
+                        if math.random() < 0.15 then
+                            label.Text = garbleText()
+                            label.TextStrokeTransparency = math.random()
+                            label.TextTransparency = math.random() * 0.8
+                        end
+                    end
+                end
+            end
+
+            wait(0.06 + math.random() * 0.06)
+        end
+
+        -- clean up this part if GLITCH_DURATION elapsed
+        if GLITCH_DURATION > 0 then
+            restorePart(part)
+        end
+    end)()
+end
+
+-- Main wave function: corrupt everything in workspace (with exclusions)
+local function corruptAll()
+    print("[Corruptor] Starting corruption wave...")
+    local queue = {}
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if isBasePart(obj) then
+            -- exclude terrain and things that would be catastrophic
+            if not obj:IsDescendantOf(ServerStorage) and not obj:IsDescendantOf(ReplicatedStorage) then
+                -- optionally skip player characters if disabled
+                if not CORRUPT_PLAYERS and obj.Parent and obj.Parent:FindFirstChild("Humanoid") then
+                    -- skip character parts
+                else
+                    table.insert(queue, obj)
+                end
+            end
+        end
+    end
+
+    -- shuffle queue
+    for i = #queue, 2, -1 do
+        local j = math.random(1,i)
+        queue[i], queue[j] = queue[j], queue[i]
+    end
+
+    -- spread out corruption across time to create a wave
+    local corrupted = 0
+    for i, part in ipairs(queue) do
+        if corrupted >= MAX_SIMULTANEOUS then break end
+        corruptPart(part)
+        corrupted = corrupted + 1
+        wait(SCAN_INTERVAL * (0.4 + math.random()*1.2))
+    end
+
+    -- notify clients for camera / screen-level corruption
+    remote:FireAllClients("start", {intensity = 1.0, duration = GLITCH_DURATION})
+    print("[Corruptor] Corruption wave scheduled on " .. tostring(corrupted) .. " parts.")
+end
+
+-- Expose a very simple interface to run/stop via server console (or call from other scripts)
+local module = {}
+module.corruptAll = corruptAll
+module.restoreAll = restoreAll
+
+-- Optional: bind to ServerScriptService Script's environment so you can call from Command Bar
+_G.Corruptor = module
+
+-- Auto-start after small delay for demo (comment this out if you want manual control)
+delay(2, function()
+    corruptAll()
+end)
+
+-- Print helpful message
+print("[Corruptor] Loaded. Use _G.Corruptor.corruptAll() or _G.Corruptor.restoreAll() from server to control the effect.")
